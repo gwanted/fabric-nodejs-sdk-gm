@@ -1,7 +1,17 @@
 /**
  * Copyright 2016-2017 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an 'AS IS' BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 'use strict';
@@ -10,7 +20,7 @@ if (global && global.hfc) global.hfc.config = undefined;
 require('nconf').reset();
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var util = require('util');
@@ -82,7 +92,7 @@ test('\n\n** CryptoKeyStore tests **\n\n', function(t) {
 	.then((st) => {
 		store = st;
 		return store.putKey(testPrivKey);
-	}).then(() => {
+	}).then((keyPEM) => {
 		t.pass('Successfully saved private key in store');
 
 		t.equal(fs.existsSync(path.join(keystorePath, testPrivKey.getSKI() + '-priv')), true,
@@ -94,7 +104,7 @@ test('\n\n** CryptoKeyStore tests **\n\n', function(t) {
 		t.equal(recoveredKey.isPrivate(), true, 'Test if the recovered key is a private key');
 
 		return store.putKey(testPubKey);
-	}).then(() => {
+	}).then((keyPEM) => {
 		t.equal(fs.existsSync(path.join(keystorePath, testPrivKey.getSKI() + '-pub')), true,
 			'Check that the public key has been saved with the proper <SKI>-pub index');
 
@@ -127,7 +137,7 @@ test('\n\n** CryptoKeyStore tests - couchdb based store tests - use configSettin
 	t.end = ((context, mockdb, f) => {
 		return function() {
 			if (mockdb) {
-				t.comment('Disconnecting the mock couchdb server');
+				console.log('Disconnecting the mock couchdb server');
 				mockdb.close();
 			}
 
@@ -154,7 +164,7 @@ test('\n\n** CryptoKeyStore tests - couchdb based store tests - use constructor 
 	t.end = ((context, mockdb, f) => {
 		return function() {
 			if (mockdb) {
-				t.comment('Disconnecting the mock couchdb server');
+				console.log('Disconnecting the mock couchdb server');
 				mockdb.close();
 			}
 
@@ -177,10 +187,10 @@ function testKeyStore(store, t) {
 	var docRev;
 
 	return store.putKey(testPrivKey)
-	.then(() => {
+	.then((keyPEM) => {
 		t.pass('Successfully saved private key in store based on couchdb');
 
-		return new Promise((resolve) => {
+		return new Promise((resolve, reject) => {
 			dbclient.use(dbname).get(testPrivKey.getSKI() + '-priv', function(err, body) {
 				if (!err) {
 					t.pass('Successfully verified private key persisted in couchdb');
@@ -197,9 +207,9 @@ function testKeyStore(store, t) {
 		t.equal(recoveredKey.isPrivate(), true, 'Test if the recovered key is a private key');
 
 		return store.putKey(testPubKey);
-	}).then(() => {
-		return new Promise((resolve) => {
-			dbclient.use(dbname).get(testPrivKey.getSKI() + '-pub', function(err) {
+	}).then((keyPEM) => {
+		return new Promise((resolve, reject) => {
+			dbclient.use(dbname).get(testPrivKey.getSKI() + '-pub', function(err, body) {
 				if (!err) {
 					t.pass('Successfully verified public key persisted in couchdb');
 					return resolve(store.getKey(testPubKey.getSKI()));
@@ -214,8 +224,8 @@ function testKeyStore(store, t) {
 		t.equal(recoveredKey.isPrivate(), true, 'Test if the recovered key is a private key');
 
 		// delete the private key entry and test if getKey() would return the public key
-		return new Promise((resolve) => {
-			dbclient.use(dbname).destroy(testPrivKey.getSKI() + '-priv', docRev, function(err) {
+		return new Promise((resolve, reject) => {
+			dbclient.use(dbname).destroy(testPrivKey.getSKI() + '-priv', docRev, function(err, body) {
 				if (!err) {
 					return resolve(store.getKey(testPubKey.getSKI()));
 				} else {
@@ -228,7 +238,7 @@ function testKeyStore(store, t) {
 		t.notEqual(recoveredKey, null, 'Successfully read public key from store using SKI');
 		t.equal(recoveredKey.isPrivate(), false, 'Test if the recovered key is a public key');
 	});
-}
+};
 
 test('\n\n** CryptoKeyStore tests - newCryptoKeyStore tests **\n\n', function(t) {
 	utils.setConfigSetting('key-value-store', 'fabric-ca-client/lib/impl/FileKeyValueStore.js');//force for 'gulp test'
@@ -256,14 +266,25 @@ test('\n\n** CryptoKeyStore tests - newCryptoKeyStore tests **\n\n', function(t)
 	t.end();
 });
 
-test('\n\n** CryptoKeyStore tests - getKey error tests **\n\n', function (t) {
+test('\n\n** CryptoKeyStore tests - getKey error tests **\n\n', function(t) {
 	// override t.end function so it'll always clear the config settings
-	testutil.resetDefaults();
+	t.end = ((context, f) => {
+		return function() {
+			if (global && global.hfc) global.hfc.config = undefined;
+			require('nconf').reset();
+
+			f.apply(context, arguments);
+		};
+	})(t, t.end);
+
 	var cryptoSuite = utils.newCryptoSuite();
-	cryptoSuite.getKey('blah').catch(err => {
-		t.ok(err.toString().includes('getKey requires CryptoKeyStore to be set.'),
-			'Test missing cryptoKeyStore: cryptoSuite.getKey');
-		t.end();
-	});
+	t.throws(
+		() => {
+			cryptoSuite.getKey('blah');
+		},
+		/getKey requires CryptoKeyStore to be set./,
+		'Test missing cryptoKeyStore: cryptoSuite.getKey'
+	);
+	t.end();
 
 });

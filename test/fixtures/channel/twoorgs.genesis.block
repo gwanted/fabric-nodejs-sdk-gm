@@ -1,11 +1,11 @@
 
-" %,≈Úå|Á—Vt¡≠(x∂=dbUÌùÃΩÖ§£å
-üå
-õå
+" Jƒ≈n∆ƒá]K{≥D¿\±˚¬›f´Êâi–ﬁÆ˚Û†å
+úå
+òå
 y
-[Ï≥∂⁄"testchainid*@cdad2d7a639cab769332bf889e0f4bc59a5db7e21c21441783a4d6bd7d10b7ad†jLé∞"w{∫ù≈K?„7∏Œ”∏6úã
-òãîãªS
-OrdererØS€P
+[†€∑‘"testchainid*@5752eea4e1aef66177dc2c40cbae60cb87e2485543f37e6c0090813c2b38bf42’1Ω∂Á)aÙŸÙW¥G`ÀÙ´äûKÓôã
+ïãëã∏S
+Orderer¨S€P
 
 OrdererMSPÃP°O
 MSPôOéOãO
@@ -187,36 +187,36 @@ BPdjC4N80Yys3wJ9i4/mxz1ikCFJ890EMAoGCCqGSM49BAMCA0cAMEQCID4dOXH8
 6ginPTS17oyyowkdM34Z5ATPdA7WytfA8IW+AiA0jguTMYimuWEWuTulOgyNZ3ai
 hzFkzY/dm7duN86yJQ==
 -----END CERTIFICATE-----
-Admins"4
+Admins"3
+Writers( 
+
+OrdererMSPAdmins"4
 Admins*  
 
 OrdererMSPAdmins"3
 Readers( 
 
-OrdererMSPAdmins"3
-Writers( 
-
-OrdererMSPAdmins*Admins!
-ConsensusType
-soloAdmins"
-	BatchSize
-ÄÄÄ1ÄÄ Admins!
-BatchTimeout
-500msAdmins
+OrdererMSPAdmins*Admins
 ChannelRestrictionsAdmins$
 Capabilities
 
 
-V1_1 Admins""
+V1_1 Admins!
+ConsensusType
+soloAdmins"
+	BatchSize
+ÄÄÄ1ÄÄ Admins
+BatchTimeout
+2sAdmins""
 Readers	
 ReadersAdmins""
 Writers	
+WritersAdmins"*
+BlockValidation	
 WritersAdmins""
 Admins
 
-AdminsAdmins"*
-BlockValidation	
-WritersAdmins*Adminsó5
+AdminsAdmins*Adminsó5
 Consortiumsá5º4
 SampleConsortiumß4ê
 Org1MSPÑ‚
@@ -286,13 +286,13 @@ U+NfZvzO8dfxqis6K5Lb+/lqRI6iajAKBggqhkjOPQQDAgNIADBFAiEAr8LYCY2b
 q5kNqOUxgHwBa2KTi/zJBR9L3IsTRDjJo8ECICf1xiDgKqZKrAMh0OCebskYwf53
 dooG04HBoqBLvB8Q
 -----END CERTIFICATE-----
-Admins"0
+Admins"1
+Admins' 
+Org1MSPAdmins"0
 Readers% 	
 Org1MSPAdmins"0
 Writers% 	
-Org1MSPAdmins"1
-Admins' 
-Org1MSPAdmins*Admins∂
+Org1MSPAdmins*Admins∂
 Org2MSP™à
 MSPÄıÚ
 Org2MSP”-----BEGIN CERTIFICATE-----
@@ -340,12 +340,12 @@ zfWdGl1HJZj1TAWMNUYxfFxfsN39bjAKBggqhkjOPQQDAgNHADBEAiB2XoqoNSRw
 YzY6sgomVYtidm7HwiXEsqkrThUHasnOugIgejAgkgXWid6WEdFSAUVpEDsRiek4
 nM2KGw+XJ5/pm/Q=
 -----END CERTIFICATE-----
-Admins"0
-Writers% 	
-Org2MSPAdmins"1
+Admins"1
 Admins' 
 Org2MSPAdmins"0
 Readers% 	
+Org2MSPAdmins"0
+Writers% 	
 Org2MSPAdmins*Admins@
 ChannelCreationPolicy'
 Admins/Channel/Orderer/Admins*/Channel/Orderer/Admins"-
@@ -359,13 +359,13 @@ nM2KGw+XJ5/pm/Q=
 
 
 V1_1 Admins""
-Writers	
-WritersAdmins""
 Admins
 
 AdminsAdmins""
 Readers	
-ReadersAdmins*Admins
+ReadersAdmins""
+Writers	
+WritersAdmins*Admins
  
  
  

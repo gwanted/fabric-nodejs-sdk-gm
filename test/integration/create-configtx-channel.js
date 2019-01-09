@@ -1,7 +1,17 @@
 /**
  * Copyright 2016 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an 'AS IS' BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 'use strict';
 
@@ -9,16 +19,18 @@ var utils = require('fabric-client/lib/utils.js');
 var logger = utils.getLogger('E2E create-channel');
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var Client = require('fabric-client');
+var util = require('util');
 var fs = require('fs');
 var path = require('path');
 
 var testUtil = require('../unit/util.js');
 var e2eUtils = require('./e2e/e2eUtils.js');
 
+var the_user = null;
 var ORGS;
 
 //
@@ -56,19 +68,20 @@ test('\n\n***** Configtx Built config  create flow  *****\n\n', function(t) {
 	.then((enrollment) => {
 		t.pass('Successfully retrieved TLS certificate');
 		tlsInfo = enrollment;
-		client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
 		return Client.newDefaultKeyValueStore({path: testUtil.storePathForOrg(org)});
 	}).then((store) => {
 		client.setStateStore(store);
 
 		return testUtil.getSubmitter(client, t, true /*get the org admin*/, 'org1');
-	}).then(() =>{
+	}).then((admin) =>{
 		t.pass('Successfully enrolled user \'admin\' for orderer (create-configtx-channel 1)');
 
 		orderer = client.newOrderer(
 			ORGS.orderer.url,
 			{
 				'pem': caroots,
+				'clientCert': tlsInfo.certificate,
+				'clientKey': tlsInfo.key,
 				'ssl-target-name-override': ORGS.orderer['server-hostname']
 			}
 		);
@@ -88,7 +101,7 @@ test('\n\n***** Configtx Built config  create flow  *****\n\n', function(t) {
 		// make sure we do not reuse the user
 		client._userContext = null;
 		return testUtil.getSubmitter(client, t, true /*get the org admin*/, 'org2');
-	}).then(() => {
+	}).then((admin) => {
 		t.pass('Successfully enrolled user \'admin\' for org2');
 
 		// sign the config
@@ -101,8 +114,9 @@ test('\n\n***** Configtx Built config  create flow  *****\n\n', function(t) {
 		// make sure we do not reuse the user
 		client._userContext = null;
 		return testUtil.getOrderAdminSubmitter(client, t);
-	}).then(() => {
+	}).then((admin) => {
 		t.pass('Successfully enrolled user \'admin\' for orderer (create-configtx-channel 2)');
+		the_user = admin;
 
 		// sign the config
 		var signature = client.signChannelConfig(config);
@@ -141,7 +155,7 @@ test('\n\n***** Configtx Built config  create flow  *****\n\n', function(t) {
 		t.fail('Failed to create the channel: ' + err.stack ? err.stack : err);
 		t.end();
 	})
-	.then(() => {
+	.then((nothing) => {
 		t.pass('Successfully waited to make sure new channel was created.');
 
 		logger.info('\n\n >>>>>>  Should fail to create the existing channel again with name :: %s <<<<<<< \n\n',channel_name);

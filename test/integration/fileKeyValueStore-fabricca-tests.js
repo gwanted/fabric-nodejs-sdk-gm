@@ -1,14 +1,24 @@
 /**
  * Copyright 2016 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 var utils = require('fabric-client/lib/utils.js');
 var logger = utils.getLogger('fileKeyValStore-fabricca');
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var testUtil = require('../unit/util.js');
@@ -18,7 +28,7 @@ var path = require('path');
 var Client = require('fabric-client');
 
 var User = require('fabric-client/lib/User.js');
-var FabricCAServices = require('fabric-ca-client/lib/FabricCAServices');
+var FabricCAServices = require('fabric-ca-client/lib/FabricCAClientImpl');
 
 var userOrg = 'org1';
 var ORGS;
@@ -39,11 +49,11 @@ test('Use FabricCAServices with a File KeyValueStore', function(t) {
 	utils.setConfigSetting('crypto-keysize', 256);
 	utils.setConfigSetting('key-value-store','fabric-client/lib/impl/FileKeyValueStore.js');
 
-	//var keyValueStore = Client.getConfigSetting('key-value-store');
+	var keyValueStore = Client.getConfigSetting('key-value-store');
 	var keyValStorePath = path.join(testUtil.getTempDir(), 'customKeyValStorePath');
 
 	var client = new Client();
-	var cryptoSuite, member;
+	var cryptoSuite, member, opts;
 
 	// clean up
 	if (testUtil.existsSync(keyValStorePath)) {
@@ -123,11 +133,11 @@ test('Use FabricCAServices with a File KeyValueStore', function(t) {
 			t.end();
 		})
 	.then(
-		function() {
+		function(user) {
 			return client.setUserContext(new User('userx'));
 		})
 	.then(
-		function() {
+		function(user) {
 			client.setCryptoSuite(cryptoSuite);
 			return client.getUserContext('admin2', true);
 		})

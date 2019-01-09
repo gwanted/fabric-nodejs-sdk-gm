@@ -1,21 +1,31 @@
 /**
  * Copyright 2016 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 var utils = require('fabric-client/lib/utils.js');
 var logger = utils.getLogger('couchdb-fabricca');
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var path = require('path');
 var Client = require('fabric-client');
 
 var User = require('fabric-client/lib/User.js');
-var FabricCAServices = require('fabric-ca-client/lib/FabricCAServices');
+var FabricCAServices = require('fabric-ca-client/lib/FabricCAClientImpl');
 var testUtil = require('../unit/util.js');
 
 var couchdbUtil = require('./couchdb-util.js');
@@ -69,9 +79,9 @@ test('Use FabricCAServices with a CouchDB KeyValueStore', function(t) {
 	// Clean up the couchdb test database
 	var dbname = 'my_member_db';
 
-	var cryptoSuite, member;
+	var cryptoSuite, member, options;
 	couchdbUtil.destroy(dbname, keyValStorePath)
-	.then( function() {
+	.then( function(status) {
 		var options = {name: dbname, url: keyValStorePath};
 		utils.newKeyValueStore(options)
 		.then(
@@ -143,11 +153,11 @@ test('Use FabricCAServices with a CouchDB KeyValueStore', function(t) {
 				t.end();
 			})
 		.then(
-			function() {
+			function(user) {
 				return client.setUserContext(new User('userx'));
 			})
 		.then(
-			function() {
+			function(user) {
 				client.setCryptoSuite(cryptoSuite);
 				return client.getUserContext('admin2', true);
 			})
@@ -169,7 +179,7 @@ test('Use FabricCAServices with a CouchDB KeyValueStore', function(t) {
 		).catch(
 			function(err) {
 				t.fail('Failed couchdb-fabricca-test with error:');
-				logger.error(err.stack ? err.stack : err);
+				 logger.error(err.stack ? err.stack : err);
 				t.end();
 			}
 		);

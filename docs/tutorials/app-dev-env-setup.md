@@ -22,7 +22,8 @@ setting up the development environment. For a comprehensive description of
 the concepts, the architecture, please visit the official
 [Hyperledger Fabric documentation](http://hyperledger-fabric.readthedocs.io/en/latest).
 
-First of all, you will need an orderer.
+First of all, you will need an
+[orderer](http://hyperledger-fabric.readthedocs.io/en/latest/orderingservice.html).
 But isn't an orderer responsible for the consensus?
 Why start here? It's true that the main responsibility of the ordering service
 of a Hyperledger Fabric blockchain network is to provide consensus on a
@@ -54,8 +55,8 @@ within the organization can register themselves to listen on that port
 to get notified.
 
 The final piece of the puzzle is identities. Every operation in a Hyperledger
-Fabric network must be digitally signed for the purposes of access control,
-or provenance/auditing (who did what), or both. Identities are
+Fabric network must be digitially signed for the purposes of access control,
+or provenance/auditing (who did what), or both. As of v1.0, identities are
 based on the Public Key Infrastructure (PKI)) standards. Every orderer node,
 every peer node and every user/transactor must have a key pair with the
 public key wrapped in a x.509 certificate signed by a
@@ -89,7 +90,7 @@ is responsible for managing the user certificates.
 You will need the following software:
 * [Docker and Docker Compose](http://hyperledger-fabric.readthedocs.io/en/latest/prereqs.html#docker-and-docker-compose) - see Hyperledger Fabric for details
 * [Nodejs](https://nodejs.org/en/download/)
-v8.9.0 or higher, up to 9.0 ( __Node v9.0+ is not supported__ )
+v6.2.0 - 6.10.0, 8.4.0+ ( __Node v7+ is not supported__ )
 
 ## Prepare crypto materials
 

@@ -1,13 +1,23 @@
 /**
  * Copyright 2016-2017 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an 'AS IS' BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 'use strict';
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var hfc = require('fabric-client');
@@ -51,11 +61,11 @@ function testLogger(t, ignoreLevels) {
 }
 
 test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
-	if (process.env.HFC_LOGGING) {
+	if (!!process.env.HFC_LOGGING) {
 		delete process.env['HFC_LOGGING'];
 	}
 
-	if (global.hfc.logger) {
+	if (!!global.hfc.logger) {
 		global.hfc.logger = undefined;
 	}
 
@@ -216,7 +226,6 @@ test('\n\n ** Logging utility tests - test setting an external logger based on b
 
 test('\n\n ** Logging utility tests - test setting an external logger based on log4js **\n\n', function (t) {
 	var logger = log4js.getLogger();
-	logger.level = 'info'; // Set level in order to output logs because by default it is OFF
 	hfc.setLogger(logger);
 
 	testLogger(t, true);
@@ -226,7 +235,7 @@ test('\n\n ** Logging utility tests - test setting an external logger based on l
 test('\n\n ** Logging utility tests - test setting an invalid external logger **\n\n', function (t) {
 	// construct an invalid logger
 	var logger = {
-		inf: function () { t.comment('info'); },
+		inf: function () { console.log('info'); },
 	};
 
 	try {

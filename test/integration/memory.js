@@ -1,7 +1,17 @@
 /**
  * Copyright 2017 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an 'AS IS' BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 'use strict';
 
@@ -9,15 +19,17 @@ var utils = require('fabric-client/lib/utils.js');
 var logger = utils.getLogger('Memory Usage');
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var Client = require('fabric-client');
 var util = require('util');
 var fs = require('fs');
 var path = require('path');
-//var heapdump = require('heapdump');
+var grpc = require('grpc');
+var heapdump = require('heapdump');
 
+var testUtil = require('../unit/util.js');
 
 /*
 	This is a test that may be used to check on memory usage.
@@ -103,11 +115,13 @@ async function createChannel(t) {
 	var signatures = [];
 	var genesis_block = null;
 	var channel = null;
+	var query_tx_id = null;
 	var instansiate_tx_id = null;
 	var results = null;
 	var response = null;
 	var request = null;
 	var tx_id = null;
+	var found = null;
 	try {
 		// lets load the client information for this organization
 		// the file only has the client section
@@ -148,7 +162,7 @@ async function createChannel(t) {
 		t.pass('Successfully set the stores for org2');
 
 		// sign the config by admin from org2
-		signature = client.signChannelConfig(config);
+		var signature = client.signChannelConfig(config);
 		t.pass('Successfully signed config update for org2');
 
 		// collect signature from org2 admin
@@ -195,10 +209,9 @@ async function createChannel(t) {
 
 		tx_id = client.newTransactionID(true);
 		request = {
-			//targets:
-			// this time we will leave blank so that we can use
-			// all the peers assigned to the channel ...some may fail
-			// if the submitter is not allowed, let's see what we get
+			//targets: // this time we will leave blank so that we can use
+				       // all the peers assigned to the channel ...some may fail
+				       // if the submitter is not allowed, let's see what we get
 			block : genesis_block,
 			txId : 	tx_id
 		};
@@ -233,9 +246,8 @@ async function createChannel(t) {
 
 		tx_id = client.newTransactionID(true);
 		request = {
-			// this does assume that we have loaded a
-			// network config with a peer by this name
-			targets: ['peer0.org1.example.com'],
+			targets: ['peer0.org1.example.com'], // this does assume that we have loaded a
+			                                     // network config with a peer by this name
 			block : genesis_block,
 			txId : 	tx_id
 		};
@@ -255,7 +267,7 @@ async function createChannel(t) {
 		process.env.GOPATH = path.join(__dirname, '../fixtures');
 		tx_id = client.newTransactionID(true);
 		// send proposal to endorser
-		request = {
+		var request = {
 			targets: ['peer0.org1.example.com'],
 			chaincodePath: 'github.com/example_cc',
 			chaincodeId: 'example',
@@ -283,7 +295,7 @@ async function createChannel(t) {
 
 		tx_id = client.newTransactionID(true); // be sure to get a admin transaction ID
 		// send proposal to endorser
-		request = {
+		var request = {
 			targets: ['peer0.org2.example.com'],
 			chaincodePath: 'github.com/example_cc',
 			chaincodeId: 'example',
@@ -322,7 +334,7 @@ async function createChannel(t) {
 		var proposal = results[1];
 		if (proposalResponses && proposalResponses[0].response && proposalResponses[0].response.status === 200) {
 			t.pass('Successfully sent Proposal and received ProposalResponse');
-			request = {
+			var request = {
 				proposalResponses: proposalResponses,
 				proposal: proposal,
 				txId : instansiate_tx_id //required to indicate that this is an admin transaction
@@ -366,8 +378,12 @@ async function actions(t) {
 	t.pass('Successfully loaded a network configuration');
 
 	var channel_name = 'mychannel2';
+	var config = null;
+	var signatures = [];
+	var genesis_block = null;
 	var channel = null;
 	var query_tx_id = null;
+	var instansiate_tx_id = null;
 	var results = null;
 	var response = null;
 	var request = null;
@@ -385,12 +401,12 @@ async function actions(t) {
 		/*
 		 *  S T A R T   U S I N G
 		 */
-		await client.setUserContext({username:'admin', password: 'adminpw'});
+		let admin = await client.setUserContext({username:'admin', password: 'adminpw'});
 		t.pass('Successfully enrolled user \'admin\' for org1');
 
 		tx_id = client.newTransactionID(); // get a non admin transaction ID
 		query_tx_id = tx_id.getTransactionID();
-		request = {
+		var request = {
 			chaincodeId : 'example',
 			fcn: 'move',
 			args: ['a', 'b','100'],
@@ -418,13 +434,13 @@ async function actions(t) {
 			t.fail('Failed to send invoke Proposal or receive valid response. Response null or status is not 200. exiting...');
 			throw new Error('Failed to send invoke Proposal or receive valid response. Response null or status is not 200. exiting...');
 		}
-		request = {
+		var request = {
 			proposalResponses: proposalResponses,
 			proposal: proposal,
 			admin : false
 		};
 
-		var eventhub = channel.getChannelEventHub('peer0.org1.example.com');
+		var eventhub = client.getEventHub('peer0.org1.example.com');
 
 		response = await invoke(t, request, tx_id, client, channel, eventhub); //logged in as org2 user
 		if (!(response[0] instanceof Error) && response[0].status === 'SUCCESS') {
@@ -434,7 +450,7 @@ async function actions(t) {
 			throw new Error('Failed to order the transaction to invoke the chaincode. Error code: ' + response.status);
 		}
 
-		request = {
+		var request = {
 			chaincodeId : 'example',
 			fcn: 'query',
 			args: ['b']
@@ -550,21 +566,28 @@ function invoke(t, request, tx_id, client, channel, eventhub) {
 	var promises = [];
 	promises.push(channel.sendTransaction(request));
 
+	eventhub.disconnect(); // clean up any old registered events
+	eventhub.connect();
+
 	let txPromise = new Promise((resolve, reject) => {
 		let handle = setTimeout(() => {
 			eventhub.disconnect();
 			t.fail('REQUEST_TIMEOUT -- eventhub did not respond');
-			reject(new Error('REQUEST_TIMEOUT:' + eventhub.getPeerAddr()));
+			reject(new Error('REQUEST_TIMEOUT:' + eventhub._ep._endpoint.addr));
 		}, 30000);
 
 		eventhub.registerTxEvent(transactionID, (tx, code) => {
 			clearTimeout(handle);
+			eventhub.unregisterTxEvent(tx); // if we do not unregister then when
+											// when we shutdown the eventhub the
+											// error call back will get called
+			eventhub.disconnect(); // all done
 
 			if (code !== 'VALID') {
 				t.fail('transaction was invalid, code = ' + code);
 				reject(new Error('INVALID:' + code));
 			} else {
-				t.pass('transaction has been committed on peer ' + eventhub.getPeerAddr());
+				t.pass('transaction has been committed on peer ' + eventhub._ep._endpoint.addr);
 				resolve();
 			}
 		}, (error) => {
@@ -572,11 +595,7 @@ function invoke(t, request, tx_id, client, channel, eventhub) {
 
 			t.fail('Event registration for this transaction was invalid ::' + error);
 			reject(error);
-		},
-			{disconnect: true}
-		);
-
-		eventhub.connect();
+		});
 	});
 	promises.push(txPromise);
 

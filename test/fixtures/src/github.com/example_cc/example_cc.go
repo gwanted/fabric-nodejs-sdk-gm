@@ -31,7 +31,6 @@ var logger = shim.NewLogger("example_cc0")
 type SimpleChaincode struct {
 }
 
-// Init - initialize the state
 func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response  {
 	logger.Info("########### example_cc0 Init ###########")
 
@@ -71,12 +70,12 @@ func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response  {
 	return shim.Success(nil)
 }
 
-// Invoke - Transaction makes payment of X units from A to B
+// Transaction makes payment of X units from A to B
 func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 	logger.Info("########### example_cc0 Invoke ###########")
 
 	function, args := stub.GetFunctionAndParameters()
-
+	
 	if function == "delete" {
 		// Deletes an entity from its state
 		return t.delete(stub, args)
@@ -85,10 +84,6 @@ func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 	if function == "query" {
 		// queries an entity state
 		return t.query(stub, args)
-	}
-
-	if function == "throwError" {
-		return t.throwError(stub, args)
 	}
 
 	if function == "move" {
@@ -201,11 +196,6 @@ func (t *SimpleChaincode) query(stub shim.ChaincodeStubInterface, args []string)
 	jsonResp := "{\"Name\":\"" + A + "\",\"Amount\":\"" + string(Avalbytes) + "\"}"
 	logger.Infof("Query Response:%s\n", jsonResp)
 	return shim.Success(Avalbytes)
-}
-
-func (t *SimpleChaincode) throwError(stub shim.ChaincodeStubInterface, args []string) pb.Response {
-	err := fmt.Errorf("throwError: an error occurred")
-	return shim.Error(err.Error())
 }
 
 func main() {

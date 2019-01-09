@@ -1,13 +1,23 @@
 /**
  * Copyright 2017 Hitachi America Ltd. All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 'use strict';
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var path = require('path');
@@ -50,7 +60,7 @@ test('\n\n **** E R R O R  T E S T I N G : instantiate call fails with non-exist
 });
 
 test('\n\n***** End-to-end flow: instantiate chaincode *****\n\n', (t) => {
-	e2eUtils.instantiateChaincode('org1', testUtil.CHAINCODE_PATH, 'v0', 'golang', false, false, t)
+	e2eUtils.instantiateChaincode('org1', testUtil.CHAINCODE_PATH, 'v0', 'golang', false, t)
 	.then((result) => {
 		if(result){
 			t.pass('Successfully instantiated chaincode on the channel');
@@ -82,7 +92,7 @@ test('\n\n **** E R R O R  T E S T I N G : instantiate call fails by instantiati
 		txId: ''
 	};
 
-	var error_snip = 'already exists';
+	var error_snip = 'chaincode exists ' + e2e.chaincodeId;
 	instantiateChaincodeForError(request, error_snip, t);
 });
 
@@ -94,6 +104,9 @@ function instantiateChaincodeForError(request, error_snip, t) {
 	var caRootsPath = ORGS.orderer.tls_cacerts;
 	let data = fs.readFileSync(path.join(__dirname, '/test', caRootsPath));
 	let caroots = Buffer.from(data).toString();
+
+	var tx_id = null;
+	var the_user = null;
 
 	var userOrg = 'org1';
 	var client = new Client();
@@ -107,13 +120,13 @@ function instantiateChaincodeForError(request, error_snip, t) {
 	.then((enrollment) => {
 		t.pass('Successfully retrieved TLS certificate');
 		tlsInfo = enrollment;
-		client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
 		return Client.newDefaultKeyValueStore({path: testUtil.storePathForOrg(orgName)});
 	}).then((store) => {
 		client.setStateStore(store);
 		return testUtil.getSubmitter(client, t, true /* use peer org admin */, userOrg);
-	}).then(() => {
+	}).then((admin) => {
 		t.pass('Successfully enrolled user \'admin\'');
+		the_user = admin;
 
 		channel.addOrderer(
 			client.newOrderer(
@@ -151,7 +164,7 @@ function instantiateChaincodeForError(request, error_snip, t) {
 	}, (err) => {
 		t.fail('Failed to enroll user \'admin\'. ' + err);
 		throw new Error('Failed to enroll user \'admin\'. ' + err);
-	}).then(() => {
+	}).then((nothing) => {
 		t.pass('Successfully initialized channel');
 		request.txId = client.newTransactionID();
 		return channel.sendInstantiateProposal(request);
@@ -159,7 +172,7 @@ function instantiateChaincodeForError(request, error_snip, t) {
 		t.fail(util.format('Failed to initialize the channel. %s', err.stack ? err.stack : err));
 		throw new Error('Failed to initialize the channel');
 	}).then((results) => {
-		testUtil.checkResults(results, error_snip, t);
+		checkResults(results, error_snip, t);
 		t.end();
 	}, (err) => {
 		t.fail('Failed to send instantiate proposal due to error: ' + err.stack ? err.stack : err);
@@ -168,4 +181,23 @@ function instantiateChaincodeForError(request, error_snip, t) {
 		t.fail('Test failed due to unexpected reasons. ' + err);
 		t.end();
 	});
+}
+
+function checkResults(results, error_snip, t) {
+	var proposalResponses = results[0];
+	for(var i in proposalResponses) {
+		let proposal_response = proposalResponses[i];
+		if(proposal_response instanceof Error) {
+			logger.info(' Got the error ==>%s<== when looking for %s', proposal_response,error_snip);
+			if(proposal_response.toString().indexOf(error_snip) > 0) {
+				t.pass(' Successfully got the error '+ error_snip);
+			}
+			else {
+				t.fail(' Failed to get error '+ error_snip);
+			}
+		}
+		else {
+			t.fail(' Failed to get an error returned :: No Error returned , should have had an error with '+ error_snip);
+		}
+	}
 }

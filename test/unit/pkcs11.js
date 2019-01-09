@@ -1,7 +1,17 @@
 /**
  * Copyright 2017 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 // To run this test case, install SoftHSM2 library at this link:
@@ -14,25 +24,27 @@
 
 'use strict';
 
-const tape = require('tape');
-const _test = require('tape-promise').default;
-const test = _test(tape);
-const fs = require('fs');
+var tape = require('tape');
+var _test = require('tape-promise');
+var test = _test(tape);
+var fs = require('fs');
 
-const crypto = require('crypto');
+var crypto = require('crypto');
+var util = require('util');
+var path = require('path');
 
-const Client = require('fabric-client');
-const utils = require('fabric-client/lib/utils.js');
-const testutil = require('./util.js');
+var Client = require('fabric-client');
+var utils = require('fabric-client/lib/utils.js');
+var testutil = require('./util.js');
 
-let libpath;
-let pin = '98765432'; // user pin not SO pin
-let slot = 0;
-let cryptoUtils;
+var libpath;
+var pin = '98765432'; // user pin not SO pin
+var slot = 0;
+var cryptoUtils;
 
 // Common locations of the PKCS11 library.
 // Based on findPKCS11Lib() in fabric/bccsp/pkcs11/impl_test.go
-const common_pkcs_pathnames = [
+var common_pkcs_pathnames = [
 	'/usr/lib/softhsm/libsofthsm2.so',								// Ubuntu
 	'/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so',				// Ubuntu  apt-get install
 	'/usr/lib/s390x-linux-gnu/softhsm/libsofthsm2.so',				// Ubuntu
@@ -41,7 +53,7 @@ const common_pkcs_pathnames = [
 	'/usr/lib/libacsp-pkcs11.so'									// LinuxOne
 ];
 
-test('\n\n**PKCS11 - locate PKCS11 libpath\n\n', async (t) => {
+test('\n\n**PKCS11 - locate PKCS11 libpath\n\n', (t) => {
 	testutil.resetDefaults();
 
 	if (typeof process.env.PKCS11_LIB === 'string' && process.env.PKCS11_LIB !== '') {
@@ -56,7 +68,7 @@ test('\n\n**PKCS11 - locate PKCS11 libpath\n\n', async (t) => {
 				t.pass('Found a library at ' + libpath);
 				break;
 			}
-		}
+		};
 	}
 
 	if (typeof process.env.PKCS11_PIN === 'string' && process.env.PKCS11_PIN !== '') {
@@ -80,67 +92,79 @@ test('\n\n**PKCS11 - locate PKCS11 libpath\n\n', async (t) => {
 			pin: pin
 		});
 
-		try {
-			// Test generate AES key, encrypt, and decrypt.
-			const key = await cryptoUtils.generateKey({algorithm: 'AES', ephemeral: true});
+		// Test generate AES key, encrypt, and decrypt.
+		return cryptoUtils.generateKey({ algorithm: 'AES', ephemeral: true })
+		.then((key) => {
 			t.pass('Successfully generated an ephemeral AES key');
 
-			const ski = key.getSKI();
+			var ski = key.getSKI();
 			t.comment('AES ski[' + ski.length + ']: ' + ski.toString('hex'));
 
-			const recoveredKey = await cryptoUtils.getKey(ski);
+			return cryptoUtils.getKey(ski);
+		})
+		.then((recoveredKey) => {
 			t.true(!!recoveredKey, 'Successfully recovered key from calculated SKI');
 
-			const message = 'Hello World!!';
 			// Encrypt a message.
-			const cipherText = cryptoUtils.encrypt(recoveredKey, Buffer.from(message), {});
+			var cipherText = cryptoUtils.encrypt(recoveredKey, Buffer.from('Hello World!!'), {});
 
+			return { recoveredKey, cipherText };
+		})
+		.then(function(param) {
 			// Decrypt a message.
-			const plainText = cryptoUtils.decrypt(recoveredKey, cipherText, {});
-			t.equal(plainText.toString(), message, 'Successfully decrypted');
+			var plainText = cryptoUtils.decrypt(param.recoveredKey, param.cipherText, {});
+			t.equal(plainText.toString(), 'Hello World!!', 'Successfully decrypted');
 			t.end();
-		} catch (e) {
+		})
+		.catch(function(e) {
 			t.fail('Error during tests. ' + e);
 			t.end();
-		}
+		});
 	}
 });
 
-test('\n\n**PKCS11 - generate a non-ephemeral key\n\n', async (t) => {
+test('\n\n**PKCS11 - generate a non-ephemeral key\n\n', (t) => {
+	// must use a saved local reference, because the 'cryptoUtils' object inside
+	// the 'then()' blocks are 'undefined'
+	var existingCrypto = cryptoUtils;
 
-	try {
-		const key = await cryptoUtils.generateKey({algorithm: 'AES', ephemeral: false});
+	return existingCrypto.generateKey({ algorithm: 'AES', ephemeral: false })
+	.then(function(key) {
 		t.pass('Successfully generated a non-ephemeral AES key');
 
-		const ski = key.getSKI();
+		var ski = key.getSKI();
 
 		// re-construct a new instance of the CryptoSuite so that when "getKey()"
 		// is called it'll not have the previously generated key in memory but
 		// have to retrieve it from persistence store
-		cryptoUtils.closeSession();
-		cryptoUtils.finalize();
+		existingCrypto.closeSession();
+		existingCrypto.finalize();
 
 		cryptoUtils = utils.newCryptoSuite({
 			lib: libpath,
 			slot: 0,
-			pin: pin
-		});
+			pin: pin });
 
-		const recoveredKey = await cryptoUtils.getKey(ski);
+		return cryptoUtils.getKey(ski);
+	})
+	.then((recoveredKey) => {
 		t.true(!!recoveredKey, 'Successfully recovered key from store using calculated SKI');
 
-		const message = 'Hello World!!';
 		// Encrypt a message.
-		const cipherText = cryptoUtils.encrypt(recoveredKey, Buffer.from(message), {});
+		var cipherText = cryptoUtils.encrypt(recoveredKey, Buffer.from('Hello World!!'), {});
 
+		return { recoveredKey, cipherText };
+	})
+	.then((param) => {
 		// Decrypt the message.
-		const plainText = cryptoUtils.decrypt(recoveredKey, cipherText, {});
-		t.equal(plainText.toString(), message, 'Successfully decrypted');
+		var plainText = cryptoUtils.decrypt(param.recoveredKey, param.cipherText, {});
+		t.equal(plainText.toString(), 'Hello World!!', 'Successfully decrypted');
 		t.end();
-	} catch (e) {
+	})
+	.catch(function(e) {
 		t.fail('Error during tests. ' + e);
 		t.end();
-	}
+	});
 });
 
 /*
@@ -149,95 +173,110 @@ test('\n\n**PKCS11 - generate a non-ephemeral key\n\n', async (t) => {
  */
 const TEST_AES_KEY = '7430b92d84e1e3da82c06aff0801aa45f4a429e73f59bfc5141e205617a30387';
 
-test('\n\n**PKCS11 - import an AES key into the crypto card\n\n', async (t) => {
+test('\n\n**PKCS11 - import an AES key into the crypto card\n\n', (t) => {
 
-	try {
-		const key = await cryptoUtils.importKey(Buffer.from(TEST_AES_KEY, 'hex'), {algorithm: 'AES'});
+	return cryptoUtils.importKey(Buffer.from(TEST_AES_KEY, 'hex'), { algorithm: 'AES' })
+	.then((key) => {
 		t.pass('Successfully imported an AES key into the crypto card');
 
-		const message = 'Hello World!!';
 		// Note cipher text has 16-byte IV prepended.
-		const cipherText = cryptoUtils.encrypt(key, Buffer.from(message), {});
-
+		var cipherText = cryptoUtils.encrypt(key, Buffer.from('Hello World!!'), {});
+		return { key, cipherText };
+	})
+	.then((param) => {
 		// Encrypt with software crypto, should get back same bytes
 		// (minus 16-byte IV).
-		// var cipher = crypto.createCipheriv(
-		// 	'aes256', Buffer.from(TEST_AES_KEY, 'hex'), param.cipherText.slice(0,16));
-		// var cipherText = cipher.update(Buffer.from('Hello World!!'));
-		// cipherText = Buffer.concat([cipherText, cipher.final()]);
+		var cipher = crypto.createCipheriv(
+			'aes256', Buffer.from(TEST_AES_KEY, 'hex'), param.cipherText.slice(0,16));
+		var cipherText = cipher.update(Buffer.from('Hello World!!'));
+		cipherText = Buffer.concat([cipherText, cipher.final()]);
 
 		// Decrypt with software crypto, should get back same plaintext.
-		const decipher = crypto.createDecipheriv(
-			'aes256', Buffer.from(TEST_AES_KEY, 'hex'), cipherText.slice(0, 16));
-		let plainText = decipher.update(
-			cipherText.slice(16, cipherText.length));
+		var decipher = crypto.createDecipheriv(
+			'aes256', Buffer.from(TEST_AES_KEY, 'hex'), param.cipherText.slice(0,16));
+		var plainText = decipher.update(
+			param.cipherText.slice(16, param.cipherText.length));
 		plainText = Buffer.concat([plainText, decipher.final()]);
 
-		t.equal(plainText.toString(), message, 'Successfully decrypted');
+		t.equal(plainText.toString(),  'Hello World!!', 'Successfully decrypted');
 		t.end();
-	} catch (e) {
+	})
+	.catch(function(e) {
 		t.fail('Error during tests. ' + e);
 		t.end();
-	}
+	});
 });
 
-test('\n\n**PKCS11 - Test generate ephemeral ECDSA key pair, sign, and verify.\n\n', async (t) => {
-	try {
-		const key = await cryptoUtils.generateKey({algorithm: 'ECDSA', ephemeral: true});
+test('\n\n**PKCS11 - Test generate ephemeral ECDSA key pair, sign, and verify.\n\n', (t) => {
+	return cryptoUtils.generateKey({ algorithm: 'ECDSA', ephemeral: true })
+	.then((key) => {
 		t.pass('Successfully generated ECDSA key pair');
 
-		const message = 'Hello World!';
-		const sig = cryptoUtils.sign(key, Buffer.from(message), null);
+		var ski = key.getSKI();
+
+		var sig = cryptoUtils.sign(key, Buffer.from('Hello World!'), null);
+
+		return { key, sig };
+	})
+	.then((param) => {
 		t.pass('Successfully signed message');
 
-		const v = cryptoUtils.verify(key, sig, Buffer.from(message));
+		var v = cryptoUtils.verify(param.key, param.sig,
+					   Buffer.from('Hello World!'));
 		t.equal(v, true, 'Successfully verified message signature');
 		t.end();
-	} catch (e) {
+	})
+	.catch(function(e) {
 		t.fail('Failed. ' + e);
 		t.end();
-	}
+	});
 });
 
-test('\n\n**PKCS11 - Test sign and verify with non-ephemeral ECDSA key pair in the crypto card.\n\n', async (t) => {
+test('\n\n**PKCS11 - Test sign and verify with non-ephemeral ECDSA key pair in the crypto card.\n\n', (t) => {
+	var existingCrypto = cryptoUtils;
 
-	try {
-		let key = await cryptoUtils.generateKey({algorithm: 'ECDSA', ephemeral: false});
+	return existingCrypto.generateKey({ algorithm: 'ECDSA', ephemeral: false })
+	.then((key) => {
 		t.pass('Successfully generated ECDSA key pair');
 
-		const ski = key.getSKI();
+		var ski = key.getSKI();
 
 		// re-construct a new instance of the CryptoSuite so that when "getKey()"
 		// is called it'll not have the previously generated key in memory but
 		// have to retrieve it from persistence store
-		cryptoUtils.closeSession();
-		cryptoUtils.finalize();
+		existingCrypto.closeSession();
+		existingCrypto.finalize();
 
 		cryptoUtils = utils.newCryptoSuite({
 			lib: libpath,
 			slot: 0,
-			pin: pin
-		});
+			pin: pin });
 
-		key = await cryptoUtils.getKey(ski);
+		return cryptoUtils.getKey(ski);
+	})
+	.then((key) => {
 		t.true(!!key, 'Successfully recovered key from store using calculated SKI');
 
-		const message = 'Hello World!';
-		const sig = cryptoUtils.sign(key, Buffer.from(message), null);
+		var sig = cryptoUtils.sign(key, Buffer.from('Hello World!'), null);
 
-		const v = cryptoUtils.verify(key, sig, Buffer.from(message));
+		return { key, sig };
+	})
+	.then((param) => {
+		var v = cryptoUtils.verify(param.key, param.sig,
+					   Buffer.from('Hello World!'));
 		t.equal(v, true, 'Successfully verified signature');
 		t.end();
-	} catch (e) {
+	})
+	.catch(function(e) {
 		t.fail('Failed. ' + e);
 		t.end();
-	}
+	});
 });
 
-test('\n\n**PKCS11 - Test Client.createUser with existing PKCS11 key.\n\n', async (t) => {
+test('\n\n**PKCS11 - Test Client.createUser with existing PKCS11 key.\n\n', (t) => {
 	// override t.end function so it'll always clear the config settings
 	t.end = ((context, f) => {
-		return function () {
+		return function() {
 			if (global && global.hfc) global.hfc.config = undefined;
 			require('nconf').reset();
 
@@ -245,28 +284,32 @@ test('\n\n**PKCS11 - Test Client.createUser with existing PKCS11 key.\n\n', asyn
 		};
 	})(t, t.end);
 
-	try {
-		const key = await cryptoUtils.generateKey({algorithm: 'ECDSA', ephemeral: false});
+	var existingCrypto = cryptoUtils;
+
+	return existingCrypto.generateKey({ algorithm: 'ECDSA', ephemeral: false })
+	.then((key) => {
 		t.pass('Successfully generated ECDSA key pair');
 
-		const ski = await key.getSKI();
+		var ski = key.getSKI();
 
 		// re-construct a new instance of the CryptoSuite so that when "getKey()"
 		// is called it'll not have the previously generated key in memory but
 		// have to retrieve it from persistence store
-		cryptoUtils.closeSession();
-		cryptoUtils.finalize();
+		existingCrypto.closeSession();
+		existingCrypto.finalize();
 
+		return ski;
+	})
+	.then((ski) => {
 		cryptoUtils = utils.newCryptoSuite({
 			lib: libpath,
 			slot: 0,
-			pin: pin
-		});
+			pin: pin });
 
-		const pkcs11Key = await cryptoUtils.getKey(ski);
-		const client = new Client();
+		var pkcs11Key = cryptoUtils.getKey(ski);
+		var client = new Client();
 		client.setCryptoSuite(cryptoUtils);
-		const user = await client.createUser(
+		return client.createUser(
 			{
 				username: 'pkcs11user',
 				mspid: 'pkcs11MSP',
@@ -276,6 +319,8 @@ test('\n\n**PKCS11 - Test Client.createUser with existing PKCS11 key.\n\n', asyn
 					signedCertPEM: '-----BEGIN CERTIFICATE-----MIIB8TCCAZegAwIBAgIUasxwoRvBrGrdyg9+HtdJ3brpcuMwCgYIKoZIzj0EAwIwfzELMAkGA1UEBhMCVVMxEzARBgNVBAgTCkNhbGlmb3JuaWExFjAUBgNVBAcTDVNhbiBGcmFuY2lzY28xHzAdBgNVBAoTFkludGVybmV0IFdpZGdldHMsIEluYy4xDDAKBgNVBAsTA1dXVzEUMBIGA1UEAxMLZXhhbXBsZS5jb20wHhcNMTcwMTE5MTk1NjAwWhcNMTcxMjE5MDM1NjAwWjAQMQ4wDAYDVQQDEwVhZG1pbjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABPHym/0MIKF/AehrshFR/bPsZOYLeTZOXx7sNYD19nhykv292TRkyBBkqjwabrU1JO4cxnzOne5mftA5wKbC4OCjYDBeMA4GA1UdDwEB/wQEAwICBDAMBgNVHRMBAf8EAjAAMB0GA1UdDgQWBBQtEfVCvKOzNSiTgpaWzaYVm6eaBzAfBgNVHSMEGDAWgBQXZ0I9qp6CP8TFHZ9bw5nRtZxIEDAKBggqhkjOPQQDAgNIADBFAiEAvGd5YDIBeQZWpP9wEHFmezvSCjrzy8VcvH/7Yuv3vcoCICy5ssNrEHEyWXqBqeKfU/zrPhHsWJFIaJEDQLRQE05l-----END CERTIFICATE-----'
 				}
 			});
+	})
+	.then((user) => {
 		if (user) {
 			t.pass('createUser, got user');
 			t.end();
@@ -283,9 +328,11 @@ test('\n\n**PKCS11 - Test Client.createUser with existing PKCS11 key.\n\n', asyn
 			t.fail('createUser, returned null');
 			t.end();
 		}
-	} catch (e) {
+	})
+	.catch(function(e) {
 		t.fail('Failed. ' + e);
 		t.end();
-	}
+	});
+
 
 });

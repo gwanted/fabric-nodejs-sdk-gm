@@ -1,31 +1,43 @@
 /**
  * Copyright 2016-2017 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an 'AS IS' BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 'use strict';
 
-const tape = require('tape');
-const _test = require('tape-promise').default;
-const test = _test(tape);
+var tape = require('tape');
+var _test = require('tape-promise');
+var test = _test(tape);
 
-const testutil = require('./util.js');
-const utils = require('fabric-client/lib/utils.js');
-const api = require('fabric-client/lib/api.js');
+var testutil = require('./util.js');
+var utils = require('fabric-client/lib/utils.js');
+var api = require('fabric-client/lib/api.js');
+var fs = require('fs');
+var path = require('path');
 
-const jsrsa = require('jsrsasign');
-const KEYUTIL = jsrsa.KEYUTIL;
-const idModule = require('fabric-client/lib/msp/identity.js');
-const Identity = idModule.Identity;
-const Signer = idModule.Signer;
-const SigningIdentity = idModule.SigningIdentity;
-const MSP = require('fabric-client/lib/msp/msp.js');
-const ecdsaKey = require('fabric-client/lib/impl/ecdsa/key.js');
+var jsrsa = require('jsrsasign');
+var KEYUTIL = jsrsa.KEYUTIL;
+var idModule = require('fabric-client/lib/msp/identity.js');
+var Identity = idModule.Identity;
+var Signer = idModule.Signer;
+var SigningIdentity = idModule.SigningIdentity;
+var MSP = require('fabric-client/lib/msp/msp.js');
+var ecdsaKey = require('fabric-client/lib/impl/ecdsa/key.js');
 
-const TEST_MSG = 'this is a test message';
+var TEST_MSG = 'this is a test message';
 
-const TEST_CERT_PEM = '-----BEGIN CERTIFICATE-----' +
+var TEST_CERT_PEM = '-----BEGIN CERTIFICATE-----' +
 'MIIDVDCCAvqgAwIBAgIBATAKBggqhkjOPQQDAjBOMRMwEQYDVQQKDArOoyBBY21l' +
 'IENvMRkwFwYDVQQDExB0ZXN0LmV4YW1wbGUuY29tMQ8wDQYDVQQqEwZHb3BoZXIx' +
 'CzAJBgNVBAYTAk5MMB4XDTE2MTIxNjIzMTAxM1oXDTE2MTIxNzAxMTAxM1owTjET' +
@@ -46,12 +58,12 @@ const TEST_CERT_PEM = '-----BEGIN CERTIFICATE-----' +
 'UWUxIC0CIQDNyHQAwzhw+512meXRwG92GfpzSBssDKLdwlrqiHOu5A==' +
 '-----END CERTIFICATE-----';
 
-const TEST_KEY_PRIVATE_PEM = '-----BEGIN PRIVATE KEY-----' +
+var TEST_KEY_PRIVATE_PEM = '-----BEGIN PRIVATE KEY-----' +
 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgZYMvf3w5VkzzsTQY' +
 'I8Z8IXuGFZmmfjIX2YSScqCvAkihRANCAAS6BhFgW/q0PzrkwT5RlWTt41VgXLgu' +
 'Pv6QKvGsW7SqK6TkcCfxsWoSjy6/r1SzzTMni3J8iQRoJ3roPmoxPLK4' +
 '-----END PRIVATE KEY-----';
-const TEST_KEY_PRIVATE_CERT_PEM = '-----BEGIN CERTIFICATE-----' +
+var TEST_KEY_PRIVATE_CERT_PEM = '-----BEGIN CERTIFICATE-----' +
 'MIICEDCCAbagAwIBAgIUXoY6X7jIpHAAgL267xHEpVr6NSgwCgYIKoZIzj0EAwIw' +
 'fzELMAkGA1UEBhMCVVMxEzARBgNVBAgTCkNhbGlmb3JuaWExFjAUBgNVBAcTDVNh' +
 'biBGcmFuY2lzY28xHzAdBgNVBAoTFkludGVybmV0IFdpZGdldHMsIEluYy4xDDAK' +
@@ -66,11 +78,11 @@ const TEST_KEY_PRIVATE_CERT_PEM = '-----BEGIN CERTIFICATE-----' +
 'BAHpeA==' +
 '-----END CERTIFICATE-----';
 
-test('\n\n ** Identity class tests **\n\n', (t) => {
+test('\n\n ** Identity class tests **\n\n', function (t) {
 	testutil.resetDefaults();
 
 	t.throws(
-		() => {
+		function() {
 			new Identity();
 		},
 		/Missing required parameter "certificate"/,
@@ -78,7 +90,15 @@ test('\n\n ** Identity class tests **\n\n', (t) => {
 	);
 
 	t.throws(
-		() => {
+		function() {
+			new Identity('cert');
+		},
+		/Missing required parameter "publicKey"/,
+		'Checking required input parameters'
+	);
+
+	t.throws(
+		function() {
 			new Identity('cert', 'pubKey');
 		},
 		/Missing required parameter "mspId"/,
@@ -86,55 +106,55 @@ test('\n\n ** Identity class tests **\n\n', (t) => {
 	);
 
 	t.throws(
-		() => {
-			new MSP();
+		function() {
+			var mspImpl = new MSP();
 		},
 		/Missing required parameter "config"/,
 		'Checking required config parameter for MSP constructor'
 	);
 
 	t.throws(
-		() => {
-			new MSP({admins: [], cryptoSuite: 'blah'});
+		function() {
+			var mspImpl = new MSP({admins: [], cryptoSuite: 'blah'});
 		},
 		/Parameter "config" missing required field "id"/,
 		'Checking required config parameter "id" for MSP constructor'
 	);
 
 	t.throws(
-		() => {
-			new MSP({admins: [], id: 'blah'});
+		function() {
+			var mspImpl = new MSP({admins: [], id: 'blah'});
 		},
 		/Parameter "config" missing required field "cryptoSuite"/,
 		'Checking required config parameter "cryptoSuite" for MSP constructor'
 	);
 
 	t.throws(
-		() => {
-			new MSP({signer: 'blah', id: 'blah', cryptoSuite: 'blah'});
+		function() {
+			var mspImpl = new MSP({signer: 'blah', id: 'blah', cryptoSuite: 'blah'});
 		},
 		/Error: Parameter "signer" must be an instance of SigningIdentity/,
 		'Checking required config parameter "admins" for MSP constructor'
 	);
 
 	t.throws(
-		() => {
-			new Signer();
+		function() {
+			var signer = new Signer();
 		},
 		/Missing required parameter "cryptoSuite"/,
 		'Checking required parameter "cryptoSuite"'
 	);
 
 	t.throws(
-		() => {
-			new Signer('blah');
+		function() {
+			var signer = new Signer('blah');
 		},
 		/Missing required parameter "key" for private key/,
 		'Checking required parameter "key"'
 	);
 
 	t.throws(
-		() => {
+		function() {
 			new SigningIdentity();
 		},
 		/Missing required parameter "certificate"/,
@@ -142,7 +162,7 @@ test('\n\n ** Identity class tests **\n\n', (t) => {
 	);
 
 	t.throws(
-		() => {
+		function() {
 			new SigningIdentity('cert');
 		},
 		/Missing required parameter "publicKey"/,
@@ -150,7 +170,7 @@ test('\n\n ** Identity class tests **\n\n', (t) => {
 	);
 
 	t.throws(
-		() => {
+		function() {
 			new SigningIdentity('cert', 'pubKey');
 		},
 		/Missing required parameter "mspId"/,
@@ -158,62 +178,62 @@ test('\n\n ** Identity class tests **\n\n', (t) => {
 	);
 
 	t.throws(
-		() => {
+		function() {
 			new SigningIdentity('cert', 'pubKey', 'mspId', 'cryptoSuite');
 		},
 		/Missing required parameter "signer"/,
 		'Checking required input parameters'
 	);
 
-	let cryptoUtils = utils.newCryptoSuite();
+	var cryptoUtils = utils.newCryptoSuite();
 	cryptoUtils.setCryptoKeyStore(utils.newCryptoKeyStore());
 
 	// test identity serialization and deserialization
-	let mspImpl = new MSP({
+	var mspImpl = new MSP({
 		rootCerts: [],
 		admins: [],
 		id: 'testMSP',
 		cryptoSuite: cryptoUtils
 	});
 
-	let pubKey = cryptoUtils.importKey(TEST_CERT_PEM, { algorithm: api.CryptoAlgorithms.X509Certificate });
-	let identity = new Identity(TEST_CERT_PEM, pubKey, mspImpl.getId(), cryptoUtils);
+	var pubKey = cryptoUtils.importKey(TEST_CERT_PEM, { algorithm: api.CryptoAlgorithms.X509Certificate });
+	var identity = new Identity(TEST_CERT_PEM, pubKey, mspImpl.getId(), cryptoUtils);
 
-	let serializedID = identity.serialize();
+	var serializedID = identity.serialize();
 	// deserializeIdentity should work both ways ... with promise and without
-	let identity_g = mspImpl.deserializeIdentity(serializedID, false);
+	var identity_g = mspImpl.deserializeIdentity(serializedID, false);
 	t.equals(identity_g.getMSPId(),'testMSP', 'deserializeIdentity call without promise');
 
 	mspImpl.deserializeIdentity(serializedID)
-		.then((dsID) => {
-			t.equal(dsID._certificate, TEST_CERT_PEM, 'Identity class function tests: deserialized certificate');
-			t.equal(dsID._publicKey.isPrivate(), false, 'Identity class function tests: deserialized public key');
-			t.equal(dsID._publicKey._key.pubKeyHex, '0452a75e1ee105da7ab3d389fda69d8a04f5cf65b305b49cec7cdbdeb91a585cf87bef5a96aa9683d96bbabfe60d8cc6f5db9d0bc8c58d56bb28887ed81c6005ac', 'Identity class function tests: deserialized public key ecparam check');
+	.then((dsID) => {
+		t.equal(dsID._certificate, TEST_CERT_PEM, 'Identity class function tests: deserialized certificate');
+		t.equal(dsID._publicKey.isPrivate(), false, 'Identity class function tests: deserialized public key');
+		t.equal(dsID._publicKey._key.pubKeyHex, '0452a75e1ee105da7ab3d389fda69d8a04f5cf65b305b49cec7cdbdeb91a585cf87bef5a96aa9683d96bbabfe60d8cc6f5db9d0bc8c58d56bb28887ed81c6005ac', 'Identity class function tests: deserialized public key ecparam check');
 
-			// manually construct a key based on the saved privKeyHex and pubKeyHex
-			let f = KEYUTIL.getKey(TEST_KEY_PRIVATE_PEM);
-			let testKey = new ecdsaKey(f);
-			let pubKey = testKey.getPublicKey();
+		// manually construct a key based on the saved privKeyHex and pubKeyHex
+		var f = KEYUTIL.getKey(TEST_KEY_PRIVATE_PEM);
+		var testKey = new ecdsaKey(f);
+		var pubKey = testKey.getPublicKey();
 
-			let signer = new Signer(cryptoUtils, testKey);
-			t.equal(signer.getPublicKey().isPrivate(), false, 'Test Signer class getPublicKey() method');
+		var signer = new Signer(cryptoUtils, testKey);
+		t.equal(signer.getPublicKey().isPrivate(), false, 'Test Signer class getPublicKey() method');
 
-			let signingID = new SigningIdentity(TEST_KEY_PRIVATE_CERT_PEM, pubKey, mspImpl.getId(), cryptoUtils, signer);
+		var signingID = new SigningIdentity(TEST_KEY_PRIVATE_CERT_PEM, pubKey, mspImpl.getId(), cryptoUtils, signer);
 
-			t.throws(
-				() => {
-					signingID.sign(TEST_MSG, {hashFunction: 'not_a_function'});
-				},
-				/The "hashFunction" field must be a function/,
-				'Test invalid hashFunction parameter for the sign() method'
-			);
+		t.throws(
+			() => {
+				signingID.sign(TEST_MSG, {hashFunction: 'not_a_function'});
+			},
+			/The "hashFunction" field must be a function/,
+			'Test invalid hashFunction parameter for the sign() method'
+		);
 
-			let sig = signingID.sign(TEST_MSG);
-			t.equal(cryptoUtils.verify(pubKey, sig, TEST_MSG), true, 'Test SigningIdentity sign() method');
-			t.equal(signingID.verify(TEST_MSG, sig), true, 'Test Identity verify() method');
-			t.end();
-		}).catch((err) => {
-			t.fail(err.stack ? err.stack : err);
-			t.end();
-		});
+		var sig = signingID.sign(TEST_MSG);
+		t.equal(cryptoUtils.verify(pubKey, sig, TEST_MSG), true, 'Test SigningIdentity sign() method');
+		t.equal(signingID.verify(TEST_MSG, sig), true, 'Test Identity verify() method');
+		t.end();
+	}).catch((err) => {
+		t.fail(err.stack ? err.stack : err);
+		t.end();
+	});
 });

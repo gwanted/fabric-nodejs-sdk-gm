@@ -1,7 +1,17 @@
 /**
  * Copyright 2016 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 // This is an end-to-end test that focuses on exercising all parts of the fabric APIs
@@ -12,11 +22,12 @@ var utils = require('fabric-client/lib/utils.js');
 var logger = utils.getLogger('get-config');
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var path = require('path');
 var fs = require('fs');
+var util = require('util');
 var e2eUtils = require('./e2e/e2eUtils.js');
 
 var Client = require('fabric-client');
@@ -24,11 +35,23 @@ var testUtil = require('../unit/util.js');
 var Peer = require('fabric-client/lib/Peer.js');
 var Orderer = require('fabric-client/lib/Orderer.js');
 
+// Get the proto bufs
+var grpc = require('grpc');
+var _eventsProto = grpc.load(__dirname + '/../../fabric-client/lib/protos/peer/events.proto').protos;
+var _commonProto = grpc.load(__dirname + '/../../fabric-client/lib/protos/common/common.proto').common;
+var _conigtxProto = grpc.load(__dirname + '/../../fabric-client/lib/protos/common/configtx.proto').common;
+var _ccTransProto = grpc.load(__dirname + '/../../fabric-client/lib/protos/peer/transaction.proto').protos;
+var _transProto = grpc.load(__dirname + '/../../fabric-client/lib/protos/peer/transaction.proto').protos;
+var _responseProto = grpc.load(__dirname + '/../../fabric-client/lib/protos/peer/proposal_response.proto').protos;
+var _ccProposalProto = grpc.load(__dirname + '/../../fabric-client/lib/protos/peer/proposal.proto').protos;
+var _ccEventProto = grpc.load(__dirname + '/../../fabric-client/lib/protos/peer/chaincode_event.proto').protos;
 
 var client = new Client();
 // IMPORTANT ------>>>>> MUST RUN e2e/create-channel.js FIRST
 var channel = client.newChannel(testUtil.END2END.channel);
 var ORGS;
+
+var the_user = null;
 
 var querys = [];
 if (process.argv.length > 2) {
@@ -55,7 +78,6 @@ test('  ---->>>>> get config <<<<<-----', function(t) {
 	.then((enrollment) => {
 		t.pass('Successfully retrieved TLS certificate');
 		tlsInfo = enrollment;
-		client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
 		return Client.newDefaultKeyValueStore({path: testUtil.storePathForOrg(orgName)});
 	}).then( function (store) {
 		client.setStateStore(store);
@@ -65,8 +87,9 @@ test('  ---->>>>> get config <<<<<-----', function(t) {
 
 		testUtil.getSubmitter(client, t, org)
 			.then(
-				function() {
+				function(admin) {
 					t.pass('Successfully enrolled user');
+					the_user = admin;
 
 					channel.addOrderer(
 						new Orderer(
@@ -107,7 +130,7 @@ test('  ---->>>>> get config <<<<<-----', function(t) {
 					t.end();
 				}
 			).then(
-				function() {
+				function(result) {
 					t.pass('channel was successfully initialized');
 					let orgs = channel.getOrganizations();
 					logger.debug(' Got the following orgs back %j', orgs);

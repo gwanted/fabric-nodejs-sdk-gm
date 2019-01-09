@@ -1,7 +1,17 @@
 /**
  * Copyright 2017 Hitachi America, Ltd. All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 // Error and supplement test cases for invoking transactions.
@@ -11,25 +21,28 @@
 //     and checks that it succeeds.
 'use strict';
 
-const tape = require('tape');
-const _test = require('tape-promise').default;
-const test = _test(tape);
+var tape = require('tape');
+var _test = require('tape-promise');
+var test = _test(tape);
 
-const Client = require('fabric-client');
-const utils = require('fabric-client/lib/utils.js');
-const testUtil = require('../unit/util.js');
-const e2e = testUtil.END2END;
-const e2eUtils = require('./e2e/e2eUtils.js');
+var Client = require('fabric-client');
+var utils = require('fabric-client/lib/utils.js');
+var testUtil = require('../unit/util.js');
+var e2e = testUtil.END2END;
+var e2eUtils = require('./e2e/e2eUtils.js');
 
-const path = require('path');
-const fs = require('fs');
-const util = require('util');
+var path = require('path');
+var fs = require('fs');
+var util = require('util');
 
-const logger = utils.getLogger('E2E testing');
+var logger = utils.getLogger('E2E testing');
 
-let ORGS;
-let tx_id = null;
-const peers = [];
+var ORGS;
+
+var tx_id = null;
+var the_user = null;
+
+var peers = [];
 
 init();
 
@@ -65,7 +78,7 @@ test('\n\n***** E R R O R  T E S T I N G: invoke transaction with one endorsemen
 
 test('\n\n***** invoke transaction with inverted order of endorsements *****\n\n', (t) => {
 	invokeChaincode('org2', 'v0', t, false, [peers[1], peers[0]])
-	.then(() => {
+	.then((result) => {
 		t.pass('Successfully invoke transaction chaincode on channel');
 		t.end();
 	}, (err) => {
@@ -82,8 +95,8 @@ function init() {
 
 	for (let key in ORGS) {
 		if (ORGS.hasOwnProperty(key) && typeof ORGS[key].peer1 !== 'undefined') {
-			const data = fs.readFileSync(path.join(__dirname, 'e2e', ORGS[key].peer1['tls_cacerts']));
-			const org = ORGS[key].peer1;
+			let data = fs.readFileSync(path.join(__dirname, 'e2e', ORGS[key].peer1['tls_cacerts']));
+			var org = ORGS[key].peer1;
 			org.pem = Buffer.from(data).toString();
 			peers.push(org);
 		}
@@ -93,15 +106,15 @@ function init() {
 function invokeChaincode(userOrg, version, t, shouldFail, peers){
 	logger.debug('invokeChaincode begin');
 	Client.setConfigSetting('request-timeout', 60000);
-	const channel_name = Client.getConfigSetting('E2E_CONFIGTX_CHANNEL_NAME', testUtil.END2END.channel);
+	var channel_name = Client.getConfigSetting('E2E_CONFIGTX_CHANNEL_NAME', testUtil.END2END.channel);
 
-	const eventhubs = [];
+	var targets = [], eventhubs = [];
 
 	// override t.end function so it'll always disconnect the event hub
 	t.end = ((context, ehs, f) => {
 		return function() {
-			for(let key in ehs) {
-				const eventhub = ehs[key];
+			for(var key in ehs) {
+				var eventhub = ehs[key];
 				if (eventhub && eventhub.isconnected()) {
 					logger.debug('Disconnecting the event hub');
 					eventhub.disconnect();
@@ -116,54 +129,76 @@ function invokeChaincode(userOrg, version, t, shouldFail, peers){
 	// submit the request. intentionally we are using a different org
 	// than the one that instantiated the chaincode, although either org
 	// should work properly
-	const client = new Client();
-	const channel = client.newChannel(channel_name);
+	var client = new Client();
+	var channel = client.newChannel(channel_name);
 
-	const caRootsPath = ORGS.orderer.tls_cacerts;
-	const data = fs.readFileSync(path.join(__dirname, 'e2e', caRootsPath));
-	const caroots = Buffer.from(data).toString();
+	var orgName = ORGS[userOrg].name;
+	var cryptoSuite = Client.newCryptoSuite();
+
+	var caRootsPath = ORGS.orderer.tls_cacerts;
+	let data = fs.readFileSync(path.join(__dirname, 'e2e', caRootsPath));
+	let caroots = Buffer.from(data).toString();
 	let tlsInfo = null;
 
 	return e2eUtils.tlsEnroll(userOrg)
 	.then((enrollment) => {
 		t.pass('Successfully retrieved TLS certificate');
 		tlsInfo = enrollment;
-		client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
 		return testUtil.getSubmitter(client, t, userOrg);
-	}).then(() => {
+	}).then((admin) => {
 		t.pass('Successfully enrolled user \'admin\'');
+		the_user = admin;
 
 		channel.addOrderer(
 			client.newOrderer(
 				ORGS.orderer.url,
 				{
 					'pem': caroots,
+					'clientCert': tlsInfo.certificate,
+					'clientKey': tlsInfo.key,
 					'ssl-target-name-override': ORGS.orderer['server-hostname']
 				}
 			)
 		);
 
 		for (let key in peers) {
-			const peer = client.newPeer(
+			let peer = client.newPeer(
 				peers[key].requests,
 				{
 					pem: peers[key].pem,
+					'clientCert': tlsInfo.certificate,
+					'clientKey': tlsInfo.key,
 					'ssl-target-name-override': peers[key]['server-hostname'],
 				});
 			channel.addPeer(peer);
-			eventhubs.push(channel.newChannelEventHub(peer));
 		}
+
+		// an event listener can only register with a peer in its own org
+		let data = fs.readFileSync(path.join(__dirname, 'e2e', ORGS[userOrg].peer1['tls_cacerts']));
+		let eh = client.newEventHub();
+		eh.setPeerAddr(
+			ORGS[userOrg].peer1.events,
+			{
+				pem: Buffer.from(data).toString(),
+				'clientCert': tlsInfo.certificate,
+				'clientKey': tlsInfo.key,
+				'ssl-target-name-override': ORGS[userOrg].peer1['server-hostname'],
+				'grpc.http2.keepalive_time' : 15
+			}
+		);
+		eh.connect();
+		eventhubs.push(eh);
 
 		return channel.initialize();
 
-	}).then(() => {
+	}).then((nothing) => {
 		tx_id = client.newTransactionID();
 
 		// send proposal to endorser
-		const request = {
+		var request = {
 			chaincodeId : e2e.chaincodeId,
 			fcn: 'move',
-			args: ['a', 'b', '100'],
+			args: ['a', 'b','100'],
 			txId: tx_id,
 		};
 		return channel.sendTransactionProposal(request);
@@ -173,13 +208,13 @@ function invokeChaincode(userOrg, version, t, shouldFail, peers){
 		throw new Error('Failed to enroll user \'admin\'. ' + err);
 
 	}).then((results) => {
-		const proposalResponses = results[0];
-		const proposal = results[1];
-		let all_good = true;
+		var proposalResponses = results[0];
+		var proposal = results[1];
+		var all_good = true;
 
-		for(let i in proposalResponses) {
+		for(var i in proposalResponses) {
 			let one_good = false;
-			const proposal_response = proposalResponses[i];
+			let proposal_response = proposalResponses[i];
 			if( proposal_response.response && proposal_response.response.status === 200) {
 				t.pass('transaction proposal has response status of good');
 				one_good = channel.verifyProposalResponse(proposal_response);
@@ -208,7 +243,7 @@ function invokeChaincode(userOrg, version, t, shouldFail, peers){
 			t.pass('Successfully sent Proposal and received ProposalResponse');
 			logger.debug(util.format('Successfully sent Proposal and received ProposalResponse: Status - %s, message - "%s", metadata - "%s", endorsement signature: %s', proposalResponses[0].response.status, proposalResponses[0].response.message, proposalResponses[0].response.payload, proposalResponses[0].endorsement.signature));
 
-			const request = {
+			var request = {
 				proposalResponses: proposalResponses,
 				proposal: proposal
 			};
@@ -216,12 +251,12 @@ function invokeChaincode(userOrg, version, t, shouldFail, peers){
 			// set the transaction listener and set a timeout of 30sec
 			// if the transaction did not get committed within the timeout period,
 			// fail the test
-			const deployId = tx_id.getTransactionID();
+			var deployId = tx_id.getTransactionID();
 
-			const eventPromises = [];
+			var eventPromises = [];
 			eventhubs.forEach((eh) => {
-				const txPromise = new Promise((resolve, reject) => {
-					const handle = setTimeout(reject, 120000);
+				let txPromise = new Promise((resolve, reject) => {
+					let handle = setTimeout(reject, 120000);
 
 					eh.registerTxEvent(deployId.toString(),
 						(tx, code) => {
@@ -246,26 +281,25 @@ function invokeChaincode(userOrg, version, t, shouldFail, peers){
 								}
 							}
 						},
-						() => {
+						(err) => {
 							clearTimeout(handle);
-							t.fail('Failed -- received notification of the event call back being cancelled for '+ deployId);
+							t.pass('Successfully received notification of the event call back being cancelled for '+ deployId);
 							resolve();
 						}
 					);
 				});
-				eh.connect();
 
 				eventPromises.push(txPromise);
 			});
 
-			const sendPromise = channel.sendTransaction(request);
+			var sendPromise = channel.sendTransaction(request);
 			return Promise.all([sendPromise].concat(eventPromises))
 			.then((results) => {
 				logger.debug('event promise all complete and testing complete');
 				return results[0]; // the first returned value is from the 'sendPromise' which is from the 'sendTransaction()' call
 			}).catch((err) => {
-				t.fail('Failed transaction ::'+ err);
-				throw new Error('Failed transaction ::'+ err);
+				t.fail('Failed to send transaction and get notifications within the timeout period.');
+				throw new Error('Failed to send transaction and get notifications within the timeout period.');
 			});
 		} else {
 			t.fail('Failed to send Proposal or receive valid response. Response null or status is not 200. exiting...');
@@ -275,4 +309,4 @@ function invokeChaincode(userOrg, version, t, shouldFail, peers){
 		t.fail('Failed to send proposal due to error: ' + err.stack ? err.stack : err);
 		throw new Error('Failed to send proposal due to error: ' + err.stack ? err.stack : err);
 	});
-}
+};

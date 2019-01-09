@@ -1,7 +1,17 @@
 /**
  * Copyright 2016-2017 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an 'AS IS' BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 'use strict';
@@ -10,12 +20,14 @@ var utils = require('fabric-client/lib/utils.js');
 var logger = utils.getLogger('integration.client');
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
+var util = require('util');
 var path = require('path');
 var fs = require('fs-extra');
 
 var Client = require('fabric-client');
+var User = require('fabric-client/lib/User.js');
 var testUtil = require('../unit/util.js');
 var couchdbUtil = require('./couchdb-util.js');
 
@@ -101,13 +113,13 @@ test('\n\n ** createUser happy path - CouchDB **\n\n', function (t) {
 	client.setCryptoSuite(cryptoSuite);
 
 	couchdbUtil.destroy(dbname, keyValStorePath)
-	.then(() => {
+	.then((status) => {
 		return utils.newKeyValueStore(keyStoreOpts);
 	}).then((store) => {
 		logger.debug('store: %s',store);
 		client.setStateStore(store);
 		return true;
-	}).then(() => {
+	}).then((status) => {
 		return client.createUser(
 			{username: caImport.orgs[userOrg].username,
 				mspid: caImport.orgs[userOrg].mspid,
@@ -154,13 +166,13 @@ test('\n\n ** createUser happy path - Cloudant  **\n\n', function (t) {
 	client.setCryptoSuite(cryptoSuite);
 
 	couchdbUtil.destroy(dbname, cloudantUrl)
-	.then(() => {
+	.then((status) => {
 		return utils.newKeyValueStore(keyStoreOpts);
 	}).then((store) => {
 		logger.debug('store: %s',store);
 		client.setStateStore(store);
 		return true;
-	}).then(() => {
+	}).then((status) => {
 		return client.createUser(
 			{username: caImport.orgs[userOrg].username,
 				mspid: caImport.orgs[userOrg].mspid,
@@ -203,13 +215,13 @@ test('\n\n ** createUser happy path - Cloudant - PEM Strings  **\n\n', function 
 	client.setCryptoSuite(cryptoSuite);
 
 	couchdbUtil.destroy(dbname, cloudantUrl)
-	.then(() => {
+	.then((status) => {
 		return utils.newKeyValueStore(keyStoreOpts);
 	}).then((store) => {
 		logger.debug('store: %s',store);
 		client.setStateStore(store);
 		return true;
-	}).then(() => {
+	}).then((status) => {
 		return client.createUser(
 			{username: caImport.orgs[userOrg].username,
 				mspid: caImport.orgs[userOrg].mspid,

@@ -1,159 +1,244 @@
 /**
  * Copyright 2017 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 'use strict';
 
-const tape = require('tape');
-const _test = require('tape-promise').default;
-const test = _test(tape);
+var tape = require('tape');
+var _test = require('tape-promise');
+var test = _test(tape);
 
-const path = require('path');
-const fs = require('fs');
+var path = require('path');
+var fs = require('fs');
+var util = require('util');
 
-const Client = require('fabric-client');
-const utils = require('fabric-client/lib/utils.js');
-const testUtil = require('../unit/util.js');
-const e2eUtils = require('./e2e/e2eUtils.js');
-const logger = utils.getLogger('upgrade-chaincode');
+var Client = require('fabric-client');
+var utils = require('fabric-client/lib/utils.js');
+var testUtil = require('../unit/util.js');
+var e2eUtils = require('./e2e/e2eUtils.js');
+var logger = utils.getLogger('upgrade-chaincode');
 
-let client, channel, e2e, ORGS;
+var client, channel, e2e, ORGS;
 
-test('\n\n **** E R R O R  T E S T I N G on upgrade call', async (t) => {
+test('\n\n **** E R R O R  T E S T I N G on upgrade call', (t) => {
 	testUtil.resetDefaults();
 
 	e2e = testUtil.END2END;
 	Client.addConfigFile(path.join(__dirname, './e2e/config.json'));
 	ORGS = Client.getConfigSetting('test-network');
 
-	const caRootsPath = ORGS.orderer.tls_cacerts;
-	const data = fs.readFileSync(path.join(__dirname, '/test', caRootsPath));
-	const caroots = Buffer.from(data).toString();
+	var caRootsPath = ORGS.orderer.tls_cacerts;
+	let data = fs.readFileSync(path.join(__dirname, '/test', caRootsPath));
+	let caroots = Buffer.from(data).toString();
 
+	var tx_id = null;
+	var the_user = null;
+	var allEventhubs = [];
 
 	testUtil.setupChaincodeDeploy();
 
-	const org = 'org1';
+	var version = 'v1';
+	var org = 'org1';
 	client = new Client();
 	channel = client.newChannel(e2e.channel);
-	const orgName = ORGS[org].name;
+	var orgName = ORGS[org].name;
+	let tlsInfo = null;
 
-	const transientMap = {'test': Buffer.from('transientValue')};
-	const tlsInfo = await e2eUtils.tlsEnroll(org);
-	t.pass('Successfully retrieved TLS certificate');
-	client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
-	const store = await Client.newDefaultKeyValueStore({path: testUtil.storePathForOrg(orgName)});
-	client.setStateStore(store);
-	await testUtil.getSubmitter(client, t, true /* use peer org admin */, org);
-	t.pass('Successfully enrolled user \'admin\'');
+	e2eUtils.tlsEnroll(org)
+	.then((enrollment) => {
+		t.pass('Successfully retrieved TLS certificate');
+		tlsInfo = enrollment;
+		return Client.newDefaultKeyValueStore({path: testUtil.storePathForOrg(orgName)});
+	}).then((store) => {
+		client.setStateStore(store);
 
-	channel.addOrderer(
-		client.newOrderer(
-			ORGS.orderer.url,
-			{
-				'pem': caroots,
-				'ssl-target-name-override': ORGS.orderer['server-hostname']
-			}
-		)
-	);
+		return testUtil.getSubmitter(client, t, true /* use peer org admin */, org);
+	})
+	.then((admin) => {
+		t.pass('Successfully enrolled user \'admin\'');
+		the_user = admin;
 
-	const targets = [];
-	for (const key in ORGS[org]) {
-		if (ORGS[org].hasOwnProperty(key)) {
-			if (key.indexOf('peer1') === 0) {
-				const data = fs.readFileSync(path.join(__dirname, '/test', ORGS[org][key]['tls_cacerts']));
-				const peer = client.newPeer(
-					ORGS[org][key].requests,
-					{
-						pem: Buffer.from(data).toString(),
-						'ssl-target-name-override': ORGS[org][key]['server-hostname']
-					}
-				);
-				targets.push(peer);
-				channel.addPeer(peer);
+		channel.addOrderer(
+			client.newOrderer(
+				ORGS.orderer.url,
+				{
+					'pem': caroots,
+					'clientCert': tlsInfo.certificate,
+					'clientKey': tlsInfo.key,
+					'ssl-target-name-override': ORGS.orderer['server-hostname']
+				}
+			)
+		);
+
+		var targets = [];
+		for (let key in ORGS[org]) {
+			if (ORGS[org].hasOwnProperty(key)) {
+				if (key.indexOf('peer1') === 0) {
+					let data = fs.readFileSync(path.join(__dirname, '/test', ORGS[org][key]['tls_cacerts']));
+					let peer = client.newPeer(
+						ORGS[org][key].requests,
+						{
+							pem: Buffer.from(data).toString(),
+							'clientCert': tlsInfo.certificate,
+							'clientKey': tlsInfo.key,
+							'ssl-target-name-override': ORGS[org][key]['server-hostname']
+						}
+					);
+					targets.push(peer);
+					channel.addPeer(peer);
+				}
 			}
 		}
-	}
 
-	await channel.initialize();
+		return channel.initialize();
 
+	})
+	.then((nothing) => {
+		t.pass('Successfully initialized channel');
+		tx_id = client.newTransactionID();
 
-	t.pass('Successfully initialized channel');
+		// send proposal to endorser
+		var request = {
+			chaincodePath: testUtil.CHAINCODE_UPGRADE_PATH,
+			chaincodeId : e2e.chaincodeId,
+			chaincodeVersion : version,
+			fcn: 'init',
+			args: ['a', '500', 'b', '600'],
+			txId: tx_id
+		};
+
+		return channel.sendUpgradeProposal(request);
+
+	}).then((results) => {
+		checkResults(results, 'version already exists', t);
+
+		return Promise.resolve(true);
+
+	}, (err) => {
+		t.fail('This should not have thrown an Error ::'+ err);
+		return Promise.resolve(true);
+	}).then((nothing) => {
+		tx_id = client.newTransactionID();
+
+		// send proposal to endorser
+		var request = {
+			chaincodePath: testUtil.CHAINCODE_UPGRADE_PATH,
+			chaincodeId: 'dummy',
+			chaincodeVersion: version,
+			fcn: 'init',
+			args: ['a', '500', 'b', '600'],
+			txId: tx_id
+		};
+
+		return channel.sendUpgradeProposal(request);
+
+	}).then((results) => {
+		checkResults(results, 'cannot get package for chaincode', t);
+
+		return Promise.resolve(true);
+
+	}).then((nothing) => {
+		tx_id = client.newTransactionID();
+
+		// send proposal to endorser
+		var request = {
+			chaincodePath: testUtil.CHAINCODE_UPGRADE_PATH,
+			chaincodeId: e2e.chaincodeId,
+			chaincodeVersion: 'v333333333',
+			fcn: 'init',
+			args: ['a', '500', 'b', '600'],
+			txId: tx_id
+		};
+
+		return channel.sendUpgradeProposal(request);
+
+	}).then((results) => {
+		checkResults(results, 'cannot get package for chaincode', t);
+		t.end();
+	}).catch((err) => {
+		t.fail('Got an Error along the way :: '+ err);
+		t.end();
+	});
+});
+
+test('\n\n **** Testing re-initializing states during upgrade ****', (t) => {
+	let eventhubs = [];
+	// override t.end function so it'll always disconnect the event hub
+	t.end = ((context, ehs, f) => {
+		return function() {
+			for(var key in ehs) {
+				var eventhub = ehs[key];
+				if (eventhub && eventhub.isconnected()) {
+					logger.debug('Disconnecting the event hub');
+					eventhub.disconnect();
+				}
+			}
+
+			f.apply(context, arguments);
+		};
+	})(t, eventhubs, t.end);
+
 	let tx_id = client.newTransactionID();
+	let VER = 'v3';
 
-	// send proposal to endorser
-	let request = {
-		chaincodeId: e2e.chaincodeId,
-		chaincodeVersion: 'v1',
-		fcn: 'init',
-		args: ['a', '500', 'b', '600'],
-		txId: tx_id,
-		transientMap
-	};
+	e2eUtils.installChaincode('org1', testUtil.CHAINCODE_UPGRADE_PATH_V2, null, VER, 'golang', t, true)
+	.then(() => {
+		return e2eUtils.installChaincode('org2', testUtil.CHAINCODE_UPGRADE_PATH_V2, null, VER, 'golang', t, true);
+	}, (err) => {
+		t.fail('Failed to install chaincode in peers of organization "org1". ' + err.stack ? err.stack : err);
+		t.end();
+	}).then(() => {
+		return e2eUtils.instantiateChaincode('org1', testUtil.CHAINCODE_UPGRADE_PATH_V2, VER, 'golang', true, t);
+	}).then((results) => {
+		let chaincodeId = testUtil.END2END.chaincodeId;
+		logger.debug('Successfully upgraded chaincode to version v3');
+		return 	e2eUtils.queryChaincode('org1', VER, '1000', chaincodeId, t);
 
-	let results = await channel.sendUpgradeProposal(request);
-
-	testUtil.checkResults(results, 'version already exists', t);
-
-
-	tx_id = client.newTransactionID();
-
-	// send proposal to endorser
-	request = {
-		chaincodeId: 'dummy',
-		chaincodeVersion: 'v1',
-		fcn: 'init',
-		args: ['a', '500', 'b', '600'],
-		txId: tx_id,
-		transientMap
-	};
-
-	results = await channel.sendUpgradeProposal(request);
-
-	testUtil.checkResults(results, 'cannot get package for chaincode', t);
-
-
-	tx_id = client.newTransactionID();
-
-	// send proposal to endorser
-	request = {
-		chaincodeId: e2e.chaincodeId,
-		chaincodeVersion: 'v333333333',
-		fcn: 'init',
-		args: ['a', '500', 'b', '600'],
-		txId: tx_id,
-		transientMap
-	};
-
-	results = await channel.sendUpgradeProposal(request);
-
-	testUtil.checkResults(results, 'cannot get package for chaincode', t);
-	t.end();
+	}).then((result) => {
+		if(result){
+			t.pass('Successfully query chaincode on the channel after re-initializing chaincode states during upgrade');
+			t.end();
+		}
+		else {
+			t.fail('Failed to query chaincode to verify re-initialized state information');
+			t.end();
+		}
+	}, (err) => {
+		t.fail('Failed to query chaincode on the channel. ' + err.stack ? err.stack : err);
+		t.end();
+	}).catch((err) => {
+		t.fail('Test failed due to unexpected reasons. ' + err.stack ? err.stack : err);
+		t.end();
+	});
 });
 
-test('\n\n **** Testing re-initializing states during upgrade ****', async (t) => {
-
-	const VER = 'v3';
-
-	await e2eUtils.installChaincode('org1', testUtil.CHAINCODE_UPGRADE_PATH_V2, null, VER, 'golang', t, true);
-	await e2eUtils.installChaincode('org2', testUtil.CHAINCODE_UPGRADE_PATH_V2, null, VER, 'golang', t, true);
-	await e2eUtils.instantiateChaincode('org1', testUtil.CHAINCODE_UPGRADE_PATH_V2, VER, 'golang', true, true, t);
-	const fcn = 'query';
-	const args = ['b'];
-	const expectedResult = '1000';
-	const targets = [];  // empty array, meaning client will get the peers from the channel
-	const chaincodeId = testUtil.END2END.chaincodeId;
-	logger.debug('Successfully upgraded chaincode to version v3');
-	const result = await e2eUtils.queryChaincode('org1', VER, targets, fcn, args, expectedResult, chaincodeId, t);
-
-	if (result) {
-		t.pass('Successfully query chaincode on the channel after re-initializing chaincode states during upgrade');
-		t.end();
+function checkResults(results, error_snip, t) {
+	var proposalResponses = results[0];
+	for(var i in proposalResponses) {
+		let proposal_response = proposalResponses[i];
+		if(proposal_response instanceof Error) {
+			logger.info(' Got the error ==>%s<== when looking for %s', proposal_response,error_snip);
+			if(proposal_response.toString().indexOf(error_snip) > 0) {
+				t.pass(' Successfully got the error '+ error_snip);
+			}
+			else {
+				t.fail(' Failed to get error '+ error_snip);
+			}
+		}
+		else {
+			t.fail(' Failed to get an error returned :: No Error returned , should have had an error with '+ error_snip);
+		}
 	}
-	else {
-		t.fail('Failed to query chaincode to verify re-initialized state information');
-		t.end();
-	}
-});
+}

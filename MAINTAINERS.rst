@@ -12,7 +12,7 @@ Maintainers
 +---------------------------+---------------------+------------------+----------------+-------------------------------------+
 | Gari Signh                | mastersingh24       | mastersingh24    | garisingh      | gari.r.singh@gmail.com              |
 +---------------------------+---------------------+------------------+----------------+-------------------------------------+
-| Andrew Coleman            | andrew-coleman      | andrew-coleman   | andrew-coleman | andrew_coleman@uk.ibm.com           |
+| Jim Zhang                 | jimthematrix        | jimthematrix     | jimthematrix   | jim\_the\_matrix@hotmail.com        |
 +---------------------------+---------------------+------------------+----------------+-------------------------------------+
 | Jonathan Levi             | JonathanLevi        | hacera           | JonathanLevi   | jonathan@hacera.com                 |
 +---------------------------+---------------------+------------------+----------------+-------------------------------------+

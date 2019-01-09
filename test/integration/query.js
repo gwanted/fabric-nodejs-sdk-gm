@@ -1,7 +1,17 @@
 /**
  * Copyright 2017 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 // This is an end to end test that focuses on exercising all parts of the fabric APIs
@@ -17,7 +27,7 @@ var utils = require('fabric-client/lib/utils.js');
 var logger = utils.getLogger('query');
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
 var path = require('path');
@@ -29,7 +39,6 @@ var testUtil = require('../unit/util.js');
 var Client = require('fabric-client');
 var Peer = require('fabric-client/lib/Peer.js');
 var Orderer = require('fabric-client/lib/Orderer.js');
-var BlockDecoder = require('fabric-client/lib/BlockDecoder.js');
 
 var client = new Client();
 var channel_id = testUtil.END2END.channel;
@@ -53,8 +62,6 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 
 	let caroots = Buffer.from(data).toString();
 	let tlsInfo = null;
-	let bcInfo = null;
-	let tx_block = null;
 
 	utils.setConfigSetting('key-value-store', 'fabric-client/lib/impl/FileKeyValueStore.js');
 	var cryptoSuite = Client.newCryptoSuite();
@@ -64,7 +71,6 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 	return e2eUtils.tlsEnroll(org).then((enrollment) => {
 		t.pass('Successfully retrieved TLS certificate');
 		tlsInfo = enrollment;
-		client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
 		return Client.newDefaultKeyValueStore({ path: testUtil.storePathForOrg(orgName) });
 	}).then((store) => {
 		client.setStateStore(store);
@@ -158,14 +164,10 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 			.payload.action.proposal_response_payload.extension.results.ns_rwset['0']
 			.rwset.writes['0'].key,
 			'test for write set key value');
-		const block_num =  Number(processed_transaction.transactionEnvelope.payload.data.actions['0']
+		t.equals('2', processed_transaction.transactionEnvelope.payload.data.actions['0']
 			.payload.action.proposal_response_payload.extension.results.ns_rwset['0']
-			.rwset.reads[1].version.block_num.toString());
-		if(parseInt(block_num) > 7) {
-			t.pass('Successfully test for read set block num');
-		} else {
-			t.fail('Failed test for read set block num - block_num > 7 ::' + block_num);
-		}
+			.rwset.reads[1].version.block_num.toString(),
+			'test for read set block num');
 
 		// the "target peer" must be a peer in the same org as the app
 		// which in this case is "peer0"
@@ -176,7 +178,6 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 		logger.debug(' Channel queryInfo() returned block height=' + blockchainInfo.height);
 		logger.debug(' Channel queryInfo() returned block previousBlockHash=' + blockchainInfo.previousBlockHash);
 		logger.debug(' Channel queryInfo() returned block currentBlockHash=' + blockchainInfo.currentBlockHash);
-		bcInfo = blockchainInfo;
 		var block_hash = blockchainInfo.currentBlockHash;
 		// send query
 		return channel.queryBlockByHash(block_hash, peer0);
@@ -186,69 +187,6 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 		return channel.queryBlockByTxID(tx_id);
 	}).then((block) => {
 		t.pass(util.format('Should find block[%s] by txid: %s', block.header.number, tx_id));
-		tx_block = block.header.number;
-
-		// query block skipping decoder
-		return channel.queryBlock(1, null, null, true);
-	}).then((binaryBlock) => {
-		if (!(binaryBlock instanceof Buffer)) {
-			t.fail('queryBlock(skipDecode = true) did not return a binary block');
-		} else {
-			let block = BlockDecoder.decode(binaryBlock);
-			if (block && block.header && block.header.number) {
-				t.pass('queryBlock(skipDecode = true) returned a decodable binary block');
-				t.equals(block.header.number, '1', 'block number is correct');
-			} else {
-				t.fail('queryBlock(skipDecode = true) did not return decodable binary block');
-			}
-		}
-
-		var block_hash = bcInfo.currentBlockHash;
-		// query by hash skipping decoder
-		return channel.queryBlockByHash(block_hash, peer0, null, true);
-	}).then((binaryBlock) => {
-		if (!(binaryBlock instanceof Buffer)) {
-			t.fail('queryBlockByHash(skipDecode = true) did not return a binary block');
-		} else {
-			let block = BlockDecoder.decode(binaryBlock);
-			if (block && block.header && block.header.number) {
-				t.pass('queryBlockByHash(skipDecode = true) returned a decodable binary block');
-				t.equals(block.header.number, (bcInfo.height - 1).toString(), 'block number is correct');
-			} else {
-				t.fail('queryBlockByHash(skipDecode = true) did not return decodable binary block');
-			}
-		}
-
-		// query by txid skipping decoder
-		return channel.queryBlockByTxID(tx_id, null, null, true);
-	}).then((binaryBlock) => {
-		if (!(binaryBlock instanceof Buffer)) {
-			t.fail('queryBlockByTxID(skipDecode = true) did not return a binary block');
-		} else {
-			let block = BlockDecoder.decode(binaryBlock);
-			if (block && block.header && block.header.number) {
-				t.pass('queryBlockByTxID(skipDecode = true) returned a decodable binary block');
-				t.equals(block.header.number, tx_block,'block number is correct');
-			} else {
-				t.fail('queryBlockByTxID(skipDecode = true) did not return decodable binary block');
-			}
-		}
-
-		// query tx skipping decoder
-		return channel.queryTransaction(tx_id, peer0, null, true); //assumes the end-to-end has run first
-	}).then((binaryTx) => {
-		if (!(binaryTx instanceof Buffer)) {
-			t.fail('queryTransaction(skipDecode = true) did not return a binary transaction');
-		} else {
-			let tx = BlockDecoder.decodeTransaction(binaryTx);
-			if (tx && tx.transactionEnvelope && tx.transactionEnvelope.payload
-				&& tx.transactionEnvelope.payload.header && tx.transactionEnvelope.payload.header.channel_header) {
-				t.pass(util.format('queryTransaction(skipDecode = true) returned binary transaction which is decodable'));
-				t.equals(tx_id, tx.transactionEnvelope.payload.header.channel_header.tx_id, 'tx_id is correct');
-			} else {
-				t.fail('queryTransaction did not return a decodable binary transaction');
-			}
-		}
 		t.end();
 	}).catch((err) => {
 		t.fail('Query channel failed:%j', err);

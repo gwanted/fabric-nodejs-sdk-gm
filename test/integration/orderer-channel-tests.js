@@ -1,17 +1,29 @@
 /**
  * Copyright 2016 IBM All Rights Reserved.
  *
- * SPDX-License-Identifier: Apache-2.0
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an 'AS IS' BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 'use strict';
 
 var utils = require('fabric-client/lib/utils.js');
+var logger = utils.getLogger('orderer-channel');
 
 
 var tape = require('tape');
-var _test = require('tape-promise').default;
+var _test = require('tape-promise');
 var test = _test(tape);
 
+var util = require('util');
 var e2eUtils = require('./e2e/e2eUtils.js');
 var fs = require('fs');
 var path = require('path');
@@ -20,7 +32,9 @@ var testUtil = require('../unit/util.js');
 
 var Client = require('fabric-client');
 var Orderer = require('fabric-client/lib/Orderer.js');
+var Channel = require('fabric-client/lib/Channel.js');
 
+var keyValStorePath = testUtil.KVS;
 var ORGS;
 
 var client = new Client();
@@ -43,7 +57,7 @@ test('\n\n** TEST ** orderer via member missing orderer', function(t) {
 	//
 	// Create and configure the test channel
 	//
-	let channel = client.newChannel('testchannel-orderer-member2');
+	let channel = client.newChannel('testChannel-orderer-member2');
 	let cryptoSuite = Client.newCryptoSuite();
 	cryptoSuite.setCryptoKeyStore(Client.newCryptoKeyStore({path: testUtil.storePathForOrg(orgName)}));
 	client.setCryptoSuite(cryptoSuite);
@@ -54,7 +68,7 @@ test('\n\n** TEST ** orderer via member missing orderer', function(t) {
 		client.setStateStore(store);
 		return testUtil.getSubmitter(client, t, org);
 	}).then(
-		function() {
+		function(admin) {
 			t.pass('Successfully enrolled user \'admin\'');
 
 			// send to orderer
@@ -96,7 +110,7 @@ test('\n\n** TEST ** orderer via member null data', function(t) {
 	//
 	// Create and configure the test channel
 	//
-	var channel = client.newChannel('testchannel-orderer-member3');
+	var channel = client.newChannel('testChannel-orderer-member3');
 	var caRootsPath = ORGS.orderer.tls_cacerts;
 	let data = fs.readFileSync(path.join(__dirname, 'e2e', caRootsPath));
 	let caroots = Buffer.from(data).toString();
@@ -106,10 +120,9 @@ test('\n\n** TEST ** orderer via member null data', function(t) {
 	.then((enrollment) => {
 		t.pass('Successfully retrieved TLS certificate');
 		tlsInfo = enrollment;
-		client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
 		return testUtil.getSubmitter(client, t, org);
 	}).then(
-		function() {
+		function(admin) {
 			t.pass('Successfully enrolled user \'admin\'');
 
 			channel.addOrderer(
@@ -117,6 +130,8 @@ test('\n\n** TEST ** orderer via member null data', function(t) {
 					ORGS.orderer.url,
 					{
 						'pem': caroots,
+						'clientCert': tlsInfo.certificate,
+						'clientKey': tlsInfo.key,
 						'ssl-target-name-override': ORGS.orderer['server-hostname']
 					}
 				)
@@ -175,7 +190,7 @@ test('\n\n** TEST ** orderer via member bad request', function(t) {
 	//
 	// Create and configure the test channel
 	//
-	var channel = client.newChannel('testchannel-orderer-member4');
+	var channel = client.newChannel('testChannel-orderer-member4');
 
 	// Set bad orderer address here
 	var caRootsPath = ORGS.orderer.tls_cacerts;
@@ -187,10 +202,9 @@ test('\n\n** TEST ** orderer via member bad request', function(t) {
 	.then((enrollment) => {
 		t.pass('Successfully retrieved TLS certificate');
 		tlsInfo = enrollment;
-		client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
 		return testUtil.getSubmitter(client, t, org);
 	}).then(
-		function() {
+		function(admin) {
 			t.pass('Successfully enrolled user \'admin\'');
 
 			channel.addOrderer(

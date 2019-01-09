@@ -3,27 +3,50 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 */
-const gulp = require('gulp');
-const eslint = require('gulp-eslint');
+var gulp = require('gulp');
+var eslint = require('gulp-eslint');
 
-gulp.task('lint', () => {
+gulp.task('lint', function () {
 	return gulp.src([
 		'**/*.js',
-		'fabric-network/**/*.js',
 		'fabric-client/**/*.js',
 		'fabric-ca-client/lib/*.js',
-		'!coverage/**',
-		'!docs/**',
-		'!fabric-network/coverage/**',
-		'!fabric-network/node_modules/**',
-		'!fabric-client/coverage/**',
-		'!fabric-client/node_modules/**',
-		'!fabric-ca-client/coverage/**',
-		'!fabric-ca-client/node_modules/**',
+		'!test/typescript/test.js',
 		'!node_modules/**',
-		'!test/typescript/*.js',
+		'!fabric-client/node_modules/**',
+		'!fabric-ca-client/node_modules/**',
+		'!docs/**',
+		'!coverage/**',
 		'!tmp/**',
-	]).pipe(eslint())
-		.pipe(eslint.format())
-		.pipe(eslint.failAfterError());
+	])
+	.pipe(eslint(
+		{
+			env: ['es6', 'node'],
+			extends: 'eslint:recommended',
+			parserOptions: {
+				ecmaVersion: 2017,
+				sourceType: 'module'
+			},
+			rules: {
+				indent: ['error', 'tab'],
+				'linebreak-style': ['error', 'unix'],
+				quotes: ['error', 'single'],
+				semi: ['error', 'always'],
+				'no-trailing-spaces': ['error'],
+				'max-len': [
+					'error',
+					{
+						'code': 150,
+						'ignoreTrailingComments': true,
+						'ignoreUrls': true,
+						'ignoreStrings': true,
+						'ignoreTemplateLiterals': true,
+						'ignoreRegExpLiterals': true,
+					},
+				],
+			}
+		}
+	))
+	.pipe(eslint.format())
+	.pipe(eslint.failAfterError());
 });
