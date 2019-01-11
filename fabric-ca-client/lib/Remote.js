@@ -1,37 +1,32 @@
 /*
- Copyright 2016 IBM All Rights Reserved.
-
- Licensed under the Apache License, Version 2.0 (the 'License');
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
-		http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an 'AS IS' BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
 */
+
 
 'use strict';
 
-var grpc = require('grpc');
-var urlParser = require('url');
-var crypto = require('crypto');
-var util = require('util');
+const grpc = require('grpc');
+const urlParser = require('url');
 
-var utils = require('./utils.js');
-var logger = utils.getLogger('Remote.js');
-var Hash = require('./hash.js');
+const utils = require('./utils.js');
+const logger = utils.getLogger('Remote.js');
+const {hash_sha2_256} = require('./hash');
+const MAX_SEND = 'grpc.max_send_message_length';
+const MAX_RECEIVE = 'grpc.max_receive_message_length';
+const MAX_SEND_V10 = 'grpc-max-send-message-length';
+const MAX_RECEIVE_V10 = 'grpc-max-receive-message-length';
 
+// the logger available during construction of instances
+const super_logger = utils.getLogger('Remote.js');
 
 /**
  * The Remote class represents a the base class for all remote nodes, Peer, Orderer , and MemberServicespeer.
  *
  * @class
  */
-var Remote = class {
+class Remote {
 
 	/**
 	 * Constructs an object with the endpoint configuration settings.
@@ -52,87 +47,114 @@ var Remote = class {
 	 *    at, the application can work around the client TLS verify failure by setting this property to the
 	 *    value of the server certificate's hostname
 	 * <br>- any other standard grpc call options will be passed to the grpc service calls directly
+	 *        grpc options must be an object with string keys and integer or string values
 	 */
-	constructor(url, opts) {
-		var _name = null;
-		var pem = null;
-		var clientKey = null;
-		this.clientCert = null;
-		var ssl_target_name_override = '';
-		var default_authority = '';
-
-		if (opts && opts.pem) {
-			pem = opts.pem;
+	constructor(url, opts = {}) {
+		this._options = {};
+		for (const key in opts) {
+			const value = opts[key];
+			if (value && typeof value !== 'string' && !Number.isInteger(value)) {
+				throw new Error(`invalid grpc option value:${key}-> ${value} expected string|integer`);
+			}
+			if (key !== 'pem' && key !== 'ssl-target-name-override') {
+				this._options[key] = value;
+			}
 		}
 
-		if (opts && opts.clientKey) {
-			clientKey = opts.clientKey;
-		}
+		const {pem, clientKey, clientCert, ['ssl-target-name-override']: ssl_target_name_override} = opts;
 
-		if (opts && opts.clientCert) {
-			this.clientCert = opts.clientCert;
-		}
-
-		if (opts && opts['ssl-target-name-override']) {
-			ssl_target_name_override = opts['ssl-target-name-override'];
-			default_authority = opts['ssl-target-name-override'];
-		}
+		this.clientCert = clientCert;
 
 		// connection options
-		this._options = {};
-		if (ssl_target_name_override !== '') {
+
+		if (ssl_target_name_override && typeof ssl_target_name_override === 'string') {
 			this._options['grpc.ssl_target_name_override'] = ssl_target_name_override;
+			this._options['grpc.default_authority'] = ssl_target_name_override;
 		}
 
-		if (default_authority !== '') {
-			this._options['grpc.default_authority'] = default_authority;
-		}
-
-		for (let key in opts ? opts : {}) {
-			if (opts.hasOwnProperty(key)) {
-				if (key !== 'pem' && key !== 'ssl-target-name-override') {
-					this._options[key] = opts[key];
-				}
+		let grpc_receive_max;
+		if (opts[MAX_RECEIVE_V10]) {
+			grpc_receive_max = opts[MAX_RECEIVE_V10];
+		} else if (opts[MAX_RECEIVE]) {
+			grpc_receive_max = opts[MAX_RECEIVE];
+		} else {
+			grpc_receive_max = utils.getConfigSetting(MAX_RECEIVE_V10);
+			if (typeof grpc_receive_max === 'undefined') {
+				grpc_receive_max = utils.getConfigSetting(MAX_RECEIVE);
 			}
 		}
-
-		if(!this._options['grpc.max_receive_message_length']) {
-			let grpc_receive_max = utils.getConfigSetting('grpc.max_receive_message_length');
-			if(!grpc_receive_max) {
-				grpc_receive_max = utils.getConfigSetting('grpc-max-receive-message-length');
-			}
-			// if greater than 0, set to that specific limit
-			// if equal to -1, set to that to have no limit
-			// if 0, do not set anything to use the system default
-			if (grpc_receive_max > 0 || grpc_receive_max === -1)
-				this._options['grpc.max_receive_message_length'] = grpc_receive_max;
+		if (typeof grpc_receive_max === 'undefined') {
+			grpc_receive_max = -1; // default is unlimited
 		}
+		this._options[MAX_RECEIVE] = grpc_receive_max;
 
-		if(!this._options['grpc.max_send_message_length']) {
-			let grpc_send_max = utils.getConfigSetting('grpc.max_send_message_length');
-			if(!grpc_send_max) {
-				grpc_send_max = utils.getConfigSetting('grpc-max-send-message-length');
+		let grpc_send_max;
+		if (opts[MAX_SEND_V10]) {
+			grpc_send_max = opts[MAX_SEND_V10];
+		} else if (opts[MAX_SEND]) {
+			grpc_send_max = opts[MAX_SEND];
+		} else {
+			grpc_send_max = utils.getConfigSetting(MAX_SEND_V10);
+			if (typeof grpc_send_max === 'undefined') {
+				grpc_send_max = utils.getConfigSetting(MAX_SEND);
 			}
-			// if greater than 0, set to that specific limit
-			// if equal to -1, set to that to have no limit
-			// if 0, do not set anything to use the system default
-			if (grpc_send_max > 0 || grpc_send_max === -1)
-				this._options['grpc.max_send_message_length'] = grpc_send_max;
 		}
+		if (typeof grpc_send_max === 'undefined') {
+			grpc_send_max = -1; // default is unlimited
+		}
+		this._options[MAX_SEND] = grpc_send_max;
 
 		// service connection
 		this._url = url;
 		this._endpoint = new Endpoint(url, pem, clientKey, this.clientCert);
 
+		// what shall we call this remote object
+		if (opts && opts.name) {
+			this._name = opts.name;
+		} else {
+			const split = url.split('//');
+			this._name = split[1];
+		}
+
 		// node.js based timeout
-		this._request_timeout = 30000;
-		if(opts && opts['request-timeout']) {
+		if (utils.checkIntegerConfig(opts, 'request-timeout')) {
 			this._request_timeout = opts['request-timeout'];
+		} else {
+			this._request_timeout = utils.getConfigSetting('request-timeout', 30000); // default 30 seconds
 		}
-		else {
-			this._request_timeout = utils.getConfigSetting('request-timeout',30000); //default 30 seconds
+
+		if (utils.checkIntegerConfig(opts, 'grpc-wait-for-ready-timeout')) {
+			this._grpc_wait_for_ready_timeout = opts['grpc-wait-for-ready-timeout'];
+		} else {
+			this._grpc_wait_for_ready_timeout = utils.getConfigSetting('grpc-wait-for-ready-timeout', 3000); // default 3 seconds
 		}
+
+		super_logger.debug(' ** Remote instance url: %s, name: %s, options loaded are:: %j', this._url, this._name, this._options);
 	}
+
+	waitForReady(client) {
+		const self = this;
+		if (!client) {
+			throw new Error('Missing required gRPC client');
+		}
+		const timeout = new Date().getTime() + this._grpc_wait_for_ready_timeout;
+
+		return new Promise((resolve, reject) => {
+			client.waitForReady(timeout, (err) => {
+				if (err) {
+					if (err.message) {
+						err.message = err.message + ' URL:' + self.getUrl();
+					}
+					logger.error(err);
+
+					return reject(err);
+				}
+				logger.debug('Successfully connected to remote gRPC server');
+				resolve();
+			});
+		});
+	}
+
 	/**
 	 * Get the name. This is a client-side only identifier for this
 	 * object.
@@ -155,7 +177,7 @@ var Remote = class {
 	 * @returns {string} Get the URL associated with the object.
 	 */
 	getUrl() {
-		logger.debug('getUrl::'+this._url);
+		logger.debug('getUrl::' + this._url);
 		return this._url;
 	}
 
@@ -164,31 +186,56 @@ var Remote = class {
 	 * @returns {byte[]} The hash of the client certificate
 	 */
 	getClientCertHash() {
-		let hash = null;
-		if(this.clientCert) {
-			let der_cert = utils.pemToDER(this.clientCert);
-			hash = computeHash(der_cert);
+		if (this.clientCert) {
+			const der_cert = utils.pemToDER(this.clientCert);
+			const hash = new hash_sha2_256();
+			return hash.reset().update(der_cert).finalize();
+		} else {
+			return null;
 		}
-		return hash;
 	}
 
 	/**
-	* return a printable representation of this object
-	*/
+	 * Get this remote endpoints characteristics
+	 *   It's name, url, and connection options are
+	 *   the items that make this instance unique.
+	 *   These items may be useful when debugging issues
+	 *   or validating responses.
+	 */
+	getCharacteristics() {
+		const characteristics = {};
+		characteristics.url = this._url;
+		characteristics.name = this._name;
+		characteristics.options = this._options;
+
+		return characteristics;
+	}
+
+	/**
+	 * return a printable representation of this object
+	 */
 	toString() {
 		return ' Remote : {' +
 			'url:' + this._url +
-		'}';
+			'}';
 	}
-};
+}
 
 module.exports = Remote;
 
-//
-// The Endpoint class represents a remote grpc or grpcs target
-//
-var Endpoint = class {
-	constructor(url /*string*/ , pem /*string*/ , clientKey /*string*/ , clientCert /*string*/) {
+/**
+ * The Endpoint class represents a remote grpc or grpcs target
+ * @class
+ */
+class Endpoint {
+	/**
+	 *
+	 * @param {string} url
+	 * @param {string} pem
+	 * @param {string} clientKey
+	 * @param {string} clientCert
+	 */
+	constructor(url, pem, clientKey, clientCert) {
 
 		const purl = urlParser.parse(url, true);
 		let protocol;
@@ -199,13 +246,13 @@ var Endpoint = class {
 			this.addr = purl.host;
 			this.creds = grpc.credentials.createInsecure();
 		} else if (protocol === 'grpcs') {
-			if(!(typeof pem === 'string')) {
+			if (!(typeof pem === 'string')) {
 				throw new Error('PEM encoded certificate is required.');
 			}
 			const pembuf = Buffer.concat([Buffer.from(pem), Buffer.from('\0')]);
-			if (clientKey || clientCert){
+			if (clientKey || clientCert) {
 				// must have both clientKey and clientCert if either is defined
-				if (clientKey && clientCert){
+				if (clientKey && clientCert) {
 					if ((typeof clientKey === 'string') && (typeof clientCert === 'string')) {
 						const clientKeyBuf = Buffer.from(clientKey);
 						const clientCertBuf = Buffer.concat([Buffer.from(clientCert), Buffer.from('\0')]);
@@ -221,18 +268,12 @@ var Endpoint = class {
 			}
 			this.addr = purl.host;
 		} else {
-			let error = new Error();
+			const error = new Error();
 			error.name = 'InvalidProtocol';
 			error.message = 'Invalid protocol: ' + protocol + '.  URLs must begin with grpc:// or grpcs://';
 			throw error;
 		}
 	}
-};
-
-// Compute hash for replay protection
-function computeHash(data) {
-	var sha256 = crypto.createHash('sha256');
-	return sha256.update(data).digest();
 }
 
 module.exports.Endpoint = Endpoint;

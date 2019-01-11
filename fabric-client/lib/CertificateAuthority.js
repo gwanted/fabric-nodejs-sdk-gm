@@ -1,33 +1,27 @@
 /*
- Copyright 2017 IBM All Rights Reserved.
-
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
-		http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
 */
+
 
 'use strict';
 
-var api = require('./api.js');
-var utils = require('./utils.js');
-var util = require('util');
-
-var logger = utils.getLogger('CertificateAuthority.js');
+const utils = require('./utils.js');
+const logger = utils.getLogger('CertificateAuthority.js');
 
 /**
- * The CertificateAuthority class represents an Certificate Authority in the target blockchain network.
+ * The CertificateAuthority class represents a Certificate Authority configuration
+ * as defined in a Connection Profile. This class will wrapper a FabricCAClientImpl
+ * fabric-ca-client implementation as a FabricCAServices instance when this class
+ * is returned from the {@link Client#getCertificateAuthority} method. This class
+ * has all the same methods as the {@link FabricCAServices} so that this class
+ * may be used directly or use this class's {@link CertificateAuthority#getFabricCAServices}
+ * method to get the actual FabricCAServices instance.
  *
  * @class
  */
-var CertificateAuthority = class {
+const CertificateAuthority = class {
 
 	/**
 	 * Construct a CertificateAuthority object
@@ -37,16 +31,15 @@ var CertificateAuthority = class {
 	 * @returns {CertificateAuthority} The CertificateAuthority instance.
 	 */
 	constructor(name, caname, url, connection_options, tlsCACerts, registrar) {
-		logger.debug('CertificateAuthority.const ');
-		logger.debug('Organization.const ');
-		if (typeof name === 'undefined' || name === null) {
+		logger.debug('CertificateAuthority.const');
+		if (!name) {
 			throw new Error('Missing name parameter');
 		}
-		if (typeof url === 'undefined' || url === null) {
+		if (!url) {
 			throw new Error('Missing url parameter');
 		}
 		this._name = name;
-		if(caname) {
+		if (caname) {
 			this._caname = caname;
 		} else {
 			this._caname = name;
@@ -55,6 +48,8 @@ var CertificateAuthority = class {
 		this._connection_options = connection_options;
 		this._tlsCACerts = tlsCACerts;
 		this._registrar = registrar;
+
+		this.fabricCAServices = null;
 	}
 
 	/**
@@ -112,10 +107,84 @@ var CertificateAuthority = class {
 	}
 
 	/**
+	 * Set the FabricCAServices implementation
+	 *
+	 * @param {FabricCAServices} ca_services {@link FabricCAServices}
+	 */
+	setFabricCAServices(ca_services) {
+		this.fabricCAServices = ca_services;
+	}
+
+	/**
+	 * Get the FabricCAServices implementation
+	 *
+	 * @return  {@link FabricCAServices}
+	 */
+	getFabricCAServices() {
+		return this.fabricCAServices;
+	}
+
+	/**
+	 * see {@link FabricCAServices#register}
+	 */
+	register(req, registrar) {
+		return this.fabricCAServices.register(req, registrar);
+	}
+
+	/**
+	 * see {@link FabricCAServices#enroll}
+	 */
+	enroll(req) {
+		return this.fabricCAServices.enroll(req);
+	}
+
+	/**
+	 * see {@link FabricCAServices#reenroll}
+	 */
+	reenroll(currentUser, attr_reqs) {
+		return this.fabricCAServices.reenroll(currentUser, attr_reqs);
+	}
+
+	/**
+	 * see {@link FabricCAServices#revoke}
+	 */
+	revoke(request, registrar) {
+		return this.fabricCAServices.revoke(request, registrar);
+	}
+
+	/**
+	 * see {@link FabricCAServices#generateCRL}
+	 */
+	generateCRL(request, registrar) {
+		return this.fabricCAServices.generateCRL(request, registrar);
+	}
+
+	/**
+	 * see {@link FabricCAServices#newCertificateService}
+	 */
+	newCertificateService() {
+		return this.fabricCAServices.newCertificateService();
+	}
+
+	/**
+	 * see {@link FabricCAServices#newIdentityService}
+	 */
+	newIdentityService() {
+		return this.fabricCAServices.newIdentityService();
+	}
+
+	/**
+	 * see {@link FabricCAServices#newAffiliationService}
+	 */
+	newAffiliationService() {
+		return this.fabricCAServices.newAffiliationService();
+	}
+
+	/**
 	 * return a printable representation of this object
 	 */
 	toString() {
-		return ' CertificateAuthority : {' +
+		return 'CertificateAuthority : {' +
 		'name : ' +  this._name +
 		', url : ' +  this._url +
 		'}';

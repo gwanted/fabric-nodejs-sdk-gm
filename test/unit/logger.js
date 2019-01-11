@@ -1,51 +1,50 @@
 /**
  * Copyright 2016-2017 IBM All Rights Reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the 'License');
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an 'AS IS' BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 'use strict';
 
-var tape = require('tape');
-var _test = require('tape-promise');
-var test = _test(tape);
+const tape = require('tape');
+const _test = require('tape-promise').default;
+const test = _test(tape);
 
-var hfc = require('fabric-client');
-var testutil = require('./util.js');
-var utils = require('fabric-client/lib/utils.js');
+const hfc = require('fabric-client');
+const testutil = require('./util.js');
+const utils = require('fabric-client/lib/utils.js');
 
-var bunyan = require('bunyan');
-var log4js = require('log4js');
-var intercept = require('intercept-stdout');
-var fs = require('fs-extra');
-var util = require('util');
-var path = require('path');
+const bunyan = require('bunyan');
+const log4js = require('log4js');
+const intercept = require('intercept-stdout');
+const fs = require('fs-extra');
+const util = require('util');
+const path = require('path');
+
+let backup_env = null;
+let unhook_count = 0;
+const final_unhook_count = 5;
+
+console.log(' ***** logger test loaded *****');
 
 // Logger tests /////////
 function testLogger(t, ignoreLevels) {
-	var output = '';
+	console.log(' ***** logger.js - started *****');
 
-	let unhook = intercept(function (txt) {
+	let output = '';
+
+	const unhook = intercept((txt) => {
 		output += txt;
 	});
 
-	let log = utils.getLogger('testlogger');
+	const log = utils.getLogger('testlogger');
 	log.error('Test logger - error');
 	log.warn('Test logger - warn');
 	log.info('Test logger - info');
 	log.debug('Test logger - debug');
 
 	unhook();
+	unhook_count++;
 
 	if (output.indexOf('Test logger - error') > 0 &&
 		output.indexOf('Test logger - warn') > 0 &&
@@ -60,19 +59,31 @@ function testLogger(t, ignoreLevels) {
 	}
 }
 
-test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
-	if (!!process.env.HFC_LOGGING) {
-		delete process.env['HFC_LOGGING'];
+test('\n\n ** Logging utility tests - save settings **\n\n', (t) => {
+	console.log(' ***** logger.js - save settings *****');
+
+	if (process.env.HFC_LOGGING) {
+		backup_env = process.env.HFC_LOGGING;
+	}
+	t.pass('Successfully saved the environment');
+	t.end();
+});
+
+test('\n\n ** Logging utility tests - built-in logger **\n\n', (t) => {
+	console.log(' ***** logger.js - test built-in *****');
+
+	if (process.env.HFC_LOGGING) {
+		delete process.env.HFC_LOGGING;
 	}
 
-	if (!!global.hfc.logger) {
+	if (global.hfc.logger) {
 		global.hfc.logger = undefined;
 	}
 
 	testutil.resetDefaults();
 
 	// test 2: custom logging levels for console logging
-	var output = '';
+	let output = '';
 	// setup the environment *ignore this*
 	process.env.HFC_LOGGING = "{'debug': 'console'}"; // eslint-disable-line quotes
 	// internal call. clearing the cached config.
@@ -80,13 +91,14 @@ test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
 	// internal call. clearing the cached logger.
 	global.hfc.logger = undefined;
 	try {
-		let unhook = intercept(function (txt) {
+		const unhook = intercept((txt) => {
 			output += txt;
 		});
 
-		let logger = utils.getLogger('testlogger');
+		const logger = utils.getLogger('testlogger');
 
 		unhook();
+		unhook_count++;
 
 		if (output.indexOf('Failed to parse environment variable "HFC_LOGGING"') > 0 && logger) {
 			t.pass('Successfully caught error thrown by "utils.getLogger()" on invalid environment variable value, and returned a valid default logger');
@@ -106,7 +118,7 @@ test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
 	// internal call. clearing the cached logger.
 	global.hfc.logger = undefined;
 
-	let unhook = intercept(function (txt) {
+	let unhook = intercept((txt) => {
 		output += txt;
 	});
 
@@ -117,6 +129,7 @@ test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
 	log.debug('Test logger - debug');
 
 	unhook();
+	unhook_count++;
 
 	if (output.indexOf('Test logger - error') > 0 &&
 		output.indexOf('Test logger - warn') > 0 &&
@@ -135,7 +148,7 @@ test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
 	// internal call. clearing the cached logger.
 	global.hfc.logger = undefined;
 
-	unhook = intercept(function (txt) {
+	unhook = intercept((txt) => {
 		output += txt;
 	});
 
@@ -146,6 +159,7 @@ test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
 	log.debug('Test logger - debug');
 
 	unhook();
+	unhook_count++;
 
 	if (output.indexOf('Test logger - error') > 0 &&
 		output.indexOf('Test logger - warn') > 0 &&
@@ -157,11 +171,11 @@ test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
 	}
 
 
-	let prepareEmptyFile = function (logPath) {
+	const prepareEmptyFile = function (logPath) {
 		try {
 			fs.ensureFileSync(logPath);
 
-			let stats = fs.statSync(logPath);
+			const stats = fs.statSync(logPath);
 
 			if (stats.isFile()) {
 				fs.truncateSync(logPath);
@@ -172,22 +186,25 @@ test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
 		}
 	};
 
-	let debugPath = path.join(testutil.getTempDir(), 'hfc-log/debug.log');
-	let errorPath = path.join(testutil.getTempDir(), 'hfc-log/error.log');
+	const debugPath = path.join(testutil.getTempDir(), 'hfc-log/debug.log');
+	console.log(' *** logger.js - debugPath:' + debugPath);
+	const errorPath = path.join(testutil.getTempDir(), 'hfc-log/error.log');
+	console.log(' *** logger.js - errorPath:' + errorPath);
+
 	prepareEmptyFile(debugPath);
 	prepareEmptyFile(errorPath);
 
 	hfc.setConfigSetting('hfc-logging', util.format('{"debug": "%s", "error": "%s"}', debugPath, errorPath));
 	// internal call. clearing the cached logger.
 	global.hfc.logger = undefined;
-	var log1 = utils.getLogger('testlogger');
+	const log1 = utils.getLogger('testlogger');
 	log1.error('Test logger - error');
 	log1.warn('Test logger - warn');
 	log1.info('Test logger - info');
 	log1.debug('Test logger - debug');
 
-	setTimeout(function () {
-		var data = fs.readFileSync(debugPath);
+	setTimeout(() => {
+		let data = fs.readFileSync(debugPath);
 
 		if (data.indexOf('Test logger - error') > 0 &&
 			data.indexOf('Test logger - warn') > 0 &&
@@ -216,26 +233,35 @@ test('\n\n ** Logging utility tests - built-in logger **\n\n', function (t) {
 	}, 1000);
 });
 
-test('\n\n ** Logging utility tests - test setting an external logger based on bunyan **\n\n', function (t) {
-	var logger = bunyan.createLogger({ name: 'bunyanLogger' });
+test('\n\n ** Logging utility tests - test setting an external logger based on bunyan **\n\n', (t) => {
+	console.log(' ***** logger.js - test bunyan *****');
+
+	const logger = bunyan.createLogger({name: 'bunyanLogger'});
 	hfc.setLogger(logger);
 
 	testLogger(t);
 	t.end();
 });
 
-test('\n\n ** Logging utility tests - test setting an external logger based on log4js **\n\n', function (t) {
-	var logger = log4js.getLogger();
+test('\n\n ** Logging utility tests - test setting an external logger based on log4js **\n\n', (t) => {
+	console.log(' ***** logger.js - test log4js *****');
+
+	const logger = log4js.getLogger();
+	logger.level = 'info'; // Set level in order to output logs because by default it is OFF
 	hfc.setLogger(logger);
 
 	testLogger(t, true);
 	t.end();
 });
 
-test('\n\n ** Logging utility tests - test setting an invalid external logger **\n\n', function (t) {
+test('\n\n ** Logging utility tests - test setting an invalid external logger **\n\n', (t) => {
+	console.log(' ***** logger.js - test external *****');
+
 	// construct an invalid logger
-	var logger = {
-		inf: function () { console.log('info'); },
+	const logger = {
+		inf: function () {
+			t.comment('info');
+		},
 	};
 
 	try {
@@ -243,7 +269,7 @@ test('\n\n ** Logging utility tests - test setting an invalid external logger **
 		t.fail('Should not have allowed an invalid logger to be set');
 		t.end();
 	} catch (err) {
-		var er1 = err.toString();
+		const er1 = err.toString();
 		if (er1.indexOf('debug()') > 0 &&
 			er1.indexOf('info()') > 0 &&
 			er1.indexOf('warn()') > 0 &&
@@ -255,4 +281,23 @@ test('\n\n ** Logging utility tests - test setting an invalid external logger **
 			t.end();
 		}
 	}
+});
+
+test('\n\n ** Logging utility tests - clean up **\n\n', (t) => {
+	console.log(' ***** logger.js - clean up *****');
+
+	t.equals(unhook_count, final_unhook_count, 'Checking that the unhook count is correct to check the flow');
+
+	if (backup_env) {
+		process.env.HFC_LOGGING = backup_env;
+	}
+
+	// remove the args we added
+	process.argv.pop();
+	// internal call. clearing the cached config.
+	global.hfc.config = undefined;
+	// internal call. clearing the cached logger.
+	global.hfc.logger = undefined;
+	t.pass('Successfully reset the logging environment');
+	t.end();
 });

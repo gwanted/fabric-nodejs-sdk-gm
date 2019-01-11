@@ -1,42 +1,32 @@
 /*
- Copyright 2017 IBM All Rights Reserved.
-
- Licensed under the Apache License, Version 2.0 (the 'License');
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
-		http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an 'AS IS' BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
 */
 
 'use strict';
 
-var grpc = require('grpc');
-var util = require('util');
-var path = require('path');
-var utils = require('./utils.js');
-var logger = utils.getLogger('BlockDecoder.js');
+const ProtoLoader = require('./ProtoLoader');
+const path = require('path');
+const utils = require('./utils.js');
+const logger = utils.getLogger('BlockDecoder.js');
 
-var _ccEventProto = grpc.load(__dirname + '/protos/peer/chaincode_event.proto').protos;
-var _transProto = grpc.load(__dirname + '/protos/peer/transaction.proto').protos;
-var _proposalProto = grpc.load(__dirname + '/protos/peer/proposal.proto').protos;
-var _responseProto = grpc.load(__dirname + '/protos/peer/proposal_response.proto').protos;
-var _peerConfigurationProto = grpc.load(__dirname + '/protos/peer/configuration.proto').protos;
-var _mspPrProto = grpc.load(__dirname + '/protos/msp/msp_principal.proto').common;
-var _commonProto = grpc.load(__dirname + '/protos/common/common.proto').common;
-var _configtxProto = grpc.load(__dirname + '/protos/common/configtx.proto').common;
-var _policiesProto = grpc.load(__dirname + '/protos/common/policies.proto').common;
-var _commonConfigurationProto = grpc.load(__dirname + '/protos/common/configuration.proto').common;
-var _ordererConfigurationProto = grpc.load(__dirname + '/protos/orderer/configuration.proto').orderer;
-var _mspConfigProto = grpc.load(__dirname + '/protos/msp/msp_config.proto').msp;
-var _identityProto = grpc.load(path.join(__dirname, '/protos/msp/identities.proto')).msp;
-var _rwsetProto = grpc.load(path.join(__dirname, '/protos/ledger/rwset/rwset.proto')).rwset;
-var _kv_rwsetProto = grpc.load(path.join(__dirname, '/protos/ledger/rwset/kvrwset/kv_rwset.proto')).kvrwset;
+const _ccEventProto = ProtoLoader.load(__dirname + '/protos/peer/chaincode_event.proto').protos;
+const _transProto = ProtoLoader.load(__dirname + '/protos/peer/transaction.proto').protos;
+const _proposalProto = ProtoLoader.load(__dirname + '/protos/peer/proposal.proto').protos;
+const _responseProto = ProtoLoader.load(__dirname + '/protos/peer/proposal_response.proto').protos;
+const _peerConfigurationProto = ProtoLoader.load(__dirname + '/protos/peer/configuration.proto').protos;
+const _chaincodeProto = ProtoLoader.load(__dirname + '/protos/peer/chaincode.proto').protos;
+const _mspPrProto = ProtoLoader.load(__dirname + '/protos/msp/msp_principal.proto').common;
+const _commonProto = ProtoLoader.load(__dirname + '/protos/common/common.proto').common;
+const _configtxProto = ProtoLoader.load(__dirname + '/protos/common/configtx.proto').common;
+const _policiesProto = ProtoLoader.load(__dirname + '/protos/common/policies.proto').common;
+const _commonConfigurationProto = ProtoLoader.load(__dirname + '/protos/common/configuration.proto').common;
+const _ordererConfigurationProto = ProtoLoader.load(__dirname + '/protos/orderer/configuration.proto').orderer;
+const _mspConfigProto = ProtoLoader.load(__dirname + '/protos/msp/msp_config.proto').msp;
+const _identityProto = ProtoLoader.load(path.join(__dirname, '/protos/msp/identities.proto')).msp;
+const _rwsetProto = ProtoLoader.load(path.join(__dirname, '/protos/ledger/rwset/rwset.proto')).rwset;
+const _kv_rwsetProto = ProtoLoader.load(path.join(__dirname, '/protos/ledger/rwset/kvrwset/kv_rwset.proto')).kvrwset;
 
 
 /**
@@ -45,7 +35,7 @@ var _kv_rwsetProto = grpc.load(path.join(__dirname, '/protos/ledger/rwset/kvrwse
  *
  * @class
  */
-var BlockDecoder = class {
+const BlockDecoder = class {
 	/**
 	 * An object of a fully decoded protobuf message "Block".
 	 * <br><br>
@@ -181,7 +171,7 @@ actions {array}
 	header -- {{@link SignatureHeader}}
 	payload
 		chaincode_proposal_payload
-			input -- {byte[]}
+			input -- {{@link ChaincodeInvocationSpec}} for a endorser transaction
 		action
 			proposal_response_payload
 				proposal_hash -- {byte[]}
@@ -201,6 +191,29 @@ actions {array}
 									key -- {string}
 									is_delete -- {boolean}
 									value -- {string}
+								metadata_writes -- {array}
+									key -- {string}
+									entries -- {array}
+										name -- {string}
+										value -- {byte[]}
+						collection_hashed_rwset -- {array}
+							collection_name -- {string}
+							hashed_rwset
+								hashed_reads -- {array}
+									key_hash -- {byte[]}
+									version
+										block_num -- {number}
+										tx_num -- {number}
+								hashed_writes -- {array}
+									key_hash -- {byte[]}
+									is_delete -- {boolean}
+									value_hash -- {byte[]}
+								metadata_writes -- {array}
+									key_hash -- {byte[]}
+									entries -- {array}
+										name -- {string}
+										value -- {byte[]}
+							pvt_rwset_hash -- {byte[]}
 					events
 						chaincode_id --  {string}
 						tx_id -- {string}
@@ -213,6 +226,27 @@ actions {array}
 			endorsements -- {{@link Endorsement}[]}
 </pre>
 	 * @typedef {Object} Transaction
+	 */
+
+	/**
+	 * An endorsement proposal, which includes the name of the chaincode
+	 * to be invoked and the arguments to be passed to the chaincode.
+	 * <br><br>
+	 * A "ChaincodeInvocationSpec" has the following object structure.
+<br><pre>
+chaincode_spec
+	type -- {int}
+	chaincode_id
+		path -- {string}
+		name -- {string}
+		version -- {string}
+	input
+		args -- {byte[][]}
+		decorations -- {map of string to byte[]}
+	timeout -- {int}
+</pre>
+	 *
+	 * @typedef {Object} ChaincodeInvocationSpec
 	 */
 
 	/**
@@ -465,14 +499,14 @@ rule
 		if (!block_bytes || !(block_bytes instanceof Buffer)) {
 			throw new Error('Block input data is not a byte buffer');
 		}
-		var block = {};
+		const block = {};
 		try {
-			var proto_block = _commonProto.Block.decode(block_bytes);
+			const proto_block = _commonProto.Block.decode(block_bytes);
 			block.header = decodeBlockHeader(proto_block.getHeader());
 			block.data = decodeBlockData(proto_block.getData());
 			block.metadata = decodeBlockMetaData(proto_block.getMetadata());
 		} catch (error) {
-			logger.error('decode - ::' + error.stack ? error.stack : error);
+			logger.error('decode - ::' + (error.stack ? error.stack : error));
 			throw error;
 		}
 
@@ -490,7 +524,7 @@ rule
 		if (!block_data) {
 			throw new Error('Block input data is missing');
 		}
-		var block = {};
+		const block = {};
 		try {
 			block.header = {
 				number: block_data.header.number.toString(),
@@ -500,7 +534,7 @@ rule
 			block.data = decodeBlockData(block_data.data, true);
 			block.metadata = decodeBlockMetaData(block_data.metadata);
 		} catch (error) {
-			logger.error('decode - ::' + error.stack ? error.stack : error);
+			logger.error('decode - ::' + (error.stack ? error.stack : error));
 			throw new Error('Block decode has failed with ' + error.toString());
 		}
 
@@ -533,8 +567,8 @@ payload -- {}
 		if (!(processed_transaction_bytes instanceof Buffer)) {
 			throw new Error('Proccesed transaction data is not a byte buffer');
 		}
-		let processed_transaction = {};
-		let proto_processed_transaction = _transProto.ProcessedTransaction.decode(processed_transaction_bytes);
+		const processed_transaction = {};
+		const proto_processed_transaction = _transProto.ProcessedTransaction.decode(processed_transaction_bytes);
 		processed_transaction.validationCode = proto_processed_transaction.getValidationCode();
 		processed_transaction.transactionEnvelope = decodeBlockDataEnvelope(proto_processed_transaction.getTransactionEnvelope());
 
@@ -543,7 +577,7 @@ payload -- {}
 };
 
 function decodeBlockHeader(proto_block_header) {
-	var block_header = {};
+	const block_header = {};
 	block_header.number = proto_block_header.getNumber().toString();
 	block_header.previous_hash = proto_block_header.getPreviousHash().toBuffer().toString('hex');
 	block_header.data_hash = proto_block_header.getDataHash().toBuffer().toString('hex');
@@ -552,16 +586,16 @@ function decodeBlockHeader(proto_block_header) {
 }
 
 function decodeBlockData(proto_block_data, not_proto) {
-	var data = {};
+	const data = {};
 	data.data = [];
-	for (var i in proto_block_data.data) {
-		var proto_envelope = null;
+	for (const i in proto_block_data.data) {
+		let proto_envelope = null;
 		if (not_proto) {
 			proto_envelope = _commonProto.Envelope.decode(proto_block_data.data[i]);
 		} else {
 			proto_envelope = _commonProto.Envelope.decode(proto_block_data.data[i].toBuffer());
 		}
-		var envelope = decodeBlockDataEnvelope(proto_envelope);
+		const envelope = decodeBlockDataEnvelope(proto_envelope);
 		data.data.push(envelope);
 	}
 
@@ -569,16 +603,16 @@ function decodeBlockData(proto_block_data, not_proto) {
 }
 
 function decodeBlockMetaData(proto_block_metadata) {
-	var metadata = {};
+	const metadata = {};
 	metadata.metadata = [];
 	if (proto_block_metadata && proto_block_metadata.metadata) {
-		var signatures = decodeMetadataSignatures(proto_block_metadata.metadata[0]);
+		const signatures = decodeMetadataSignatures(proto_block_metadata.metadata[0]);
 		metadata.metadata.push(signatures);
 
-		var last_config = decodeLastConfigSequenceNumber(proto_block_metadata.metadata[1]);
+		const last_config = decodeLastConfigSequenceNumber(proto_block_metadata.metadata[1]);
 		metadata.metadata.push(last_config);
 
-		var transaction_filter = decodeTransactionFilter(proto_block_metadata.metadata[2]);
+		const transaction_filter = decodeTransactionFilter(proto_block_metadata.metadata[2]);
 		metadata.metadata.push(transaction_filter);
 	}
 
@@ -586,39 +620,39 @@ function decodeBlockMetaData(proto_block_metadata) {
 }
 
 function decodeTransactionFilter(metadata_bytes) {
-	var transaction_filter = [];
-	if(!metadata_bytes) {
+	const transaction_filter = [];
+	if (!metadata_bytes) {
 		logger.debug('decodeTransactionFilter - no metadata');
 		return null;
 	}
-	if(!(metadata_bytes instanceof Buffer)) {
+	if (!(metadata_bytes instanceof Buffer)) {
 		metadata_bytes = metadata_bytes.toBuffer();
 	}
-	logger.debug('decodeTransactionFilter - metadata length:%s',metadata_bytes.length);
+	logger.debug('decodeTransactionFilter - metadata length:%s', metadata_bytes.length);
 
 	for (let i = 0; i < metadata_bytes.length; i++) {
-		let value = parseInt(metadata_bytes[i]);
-		logger.debug('decodeTransactionFilter - looking at index:%s with value:%s',i,value);
+		const value = parseInt(metadata_bytes[i]);
+		logger.debug('decodeTransactionFilter - looking at index:%s with value:%s', i, value);
 		transaction_filter.push(value);
 	}
 	return transaction_filter;
 }
 
 function decodeLastConfigSequenceNumber(metadata_bytes) {
-	var last_config = {};
+	const last_config = {};
 	last_config.value = {};
 	if (metadata_bytes) {
-		var proto_metadata = _commonProto.Metadata.decode(metadata_bytes);
-		var proto_last_config = _commonProto.LastConfig.decode(proto_metadata.getValue());
-		last_config.value.index = proto_last_config.getIndex().toString(); //unit64
+		const proto_metadata = _commonProto.Metadata.decode(metadata_bytes);
+		const proto_last_config = _commonProto.LastConfig.decode(proto_metadata.getValue());
+		last_config.value.index = proto_last_config.getIndex().toString(); // unit64
 		last_config.signatures = decodeMetadataValueSignatures(proto_metadata.signatures);
 	}
 	return last_config;
 }
 
 function decodeMetadataSignatures(metadata_bytes) {
-	var metadata = {};
-	var proto_metadata = _commonProto.Metadata.decode(metadata_bytes);
+	const metadata = {};
+	const proto_metadata = _commonProto.Metadata.decode(metadata_bytes);
 	metadata.value = proto_metadata.getValue().toBuffer().toString();
 	metadata.signatures = decodeMetadataValueSignatures(proto_metadata.signatures);
 
@@ -626,25 +660,26 @@ function decodeMetadataSignatures(metadata_bytes) {
 }
 
 function decodeMetadataValueSignatures(proto_meta_signatures) {
-	var signatures = [];
-	if (proto_meta_signatures)
-		for (let i in proto_meta_signatures) {
-			var metadata_signature = {};
-			var proto_metadata_signature = _commonProto.MetadataSignature.decode(proto_meta_signatures[i].toBuffer());
+	const signatures = [];
+	if (proto_meta_signatures) {
+		for (const i in proto_meta_signatures) {
+			const metadata_signature = {};
+			const proto_metadata_signature = _commonProto.MetadataSignature.decode(proto_meta_signatures[i].toBuffer());
 			metadata_signature.signature_header = decodeSignatureHeader(proto_metadata_signature.getSignatureHeader());
 			metadata_signature.signature = proto_metadata_signature.getSignature().toBuffer();
 			signatures.push(metadata_signature);
 		}
+	}
 
 	return signatures;
 }
 
 function decodeBlockDataEnvelope(proto_envelope) {
-	var envelope = {};
-	envelope.signature = proto_envelope.getSignature().toBuffer(); //leave as bytes
+	const envelope = {};
+	envelope.signature = proto_envelope.getSignature().toBuffer(); // leave as bytes
 
 	envelope.payload = {};
-	var proto_payload = _commonProto.Payload.decode(proto_envelope.getPayload().toBuffer());
+	const proto_payload = _commonProto.Payload.decode(proto_envelope.getPayload().toBuffer());
 	envelope.payload.header = decodeHeader(proto_payload.getHeader());
 	envelope.payload.data = HeaderType.decodePayloadBasedOnType(proto_payload.getData().toBuffer(), envelope.payload.header.channel_header.type);
 	// let's also have the type as the enum string value so it is easier to read
@@ -654,60 +689,59 @@ function decodeBlockDataEnvelope(proto_envelope) {
 }
 
 function decodeEndorserTransaction(trans_bytes) {
-	var data = {};
+	const data = {};
 	try {
-		var transaction = _transProto.Transaction.decode(trans_bytes);
+		const transaction = _transProto.Transaction.decode(trans_bytes);
 		data.actions = [];
 		if (transaction && transaction.actions) {
-			for (let i in transaction.actions) {
-				var action = {};
+			for (const i in transaction.actions) {
+				const action = {};
 				action.header = decodeSignatureHeader(transaction.actions[i].header);
 				action.payload = decodeChaincodeActionPayload(transaction.actions[i].payload);
 				data.actions.push(action);
 			}
 		}
-	} catch(error) {
-		logger.error(' Unable to decodeEndorserTransaction :: %s',error);
+	} catch (error) {
+		logger.error(' Unable to decodeEndorserTransaction :: %s', error);
 	}
 
 	return data;
 }
 
 function decodeConfigEnvelope(config_envelope_bytes) {
-	var config_envelope = {};
-	var proto_config_envelope = _configtxProto.ConfigEnvelope.decode(config_envelope_bytes);
+	const config_envelope = {};
+	const proto_config_envelope = _configtxProto.ConfigEnvelope.decode(config_envelope_bytes);
 	config_envelope.config = decodeConfig(proto_config_envelope.getConfig());
 	logger.debug('decodeConfigEnvelope - decode complete for config envelope - start config update');
 	config_envelope.last_update = {};
-	var proto_last_update = proto_config_envelope.getLastUpdate(); //this is a common.Envelope
+	const proto_last_update = proto_config_envelope.getLastUpdate(); // this is a common.Envelope
 	if (proto_last_update !== null) { // the orderer's genesis block may not have this field
 		config_envelope.last_update.payload = {};
-		var proto_payload = _commonProto.Payload.decode(proto_last_update.getPayload().toBuffer());
+		const proto_payload = _commonProto.Payload.decode(proto_last_update.getPayload().toBuffer());
 		config_envelope.last_update.payload.header = decodeHeader(proto_payload.getHeader());
 		config_envelope.last_update.payload.data = decodeConfigUpdateEnvelope(proto_payload.getData().toBuffer());
-		config_envelope.last_update.signature = proto_last_update.getSignature().toBuffer(); //leave as bytes
+		config_envelope.last_update.signature = proto_last_update.getSignature().toBuffer(); // leave as bytes
 	}
 
 	return config_envelope;
 }
 
 function decodeConfig(proto_config) {
-	var config = {};
-	config.sequence = proto_config.getSequence().toString(); //unit64
+	const config = {};
+	config.sequence = proto_config.getSequence().toString(); // unit64
 	config.channel_group = decodeConfigGroup(proto_config.getChannelGroup());
-	config.type = proto_config.getType();
 
 	return config;
 }
 
 function decodeConfigUpdateEnvelope(config_update_envelope_bytes) {
-	var config_update_envelope = {};
-	var proto_config_update_envelope = _configtxProto.ConfigUpdateEnvelope.decode(config_update_envelope_bytes);
+	const config_update_envelope = {};
+	const proto_config_update_envelope = _configtxProto.ConfigUpdateEnvelope.decode(config_update_envelope_bytes);
 	config_update_envelope.config_update = decodeConfigUpdate(proto_config_update_envelope.getConfigUpdate().toBuffer());
-	var signatures = [];
-	for (var i in proto_config_update_envelope.signatures) {
-		let proto_configSignature = proto_config_update_envelope.signatures[i];
-		var config_signature = decodeConfigSignature(proto_configSignature);
+	const signatures = [];
+	for (const i in proto_config_update_envelope.signatures) {
+		const proto_configSignature = proto_config_update_envelope.signatures[i];
+		const config_signature = decodeConfigSignature(proto_configSignature);
 		signatures.push(config_signature);
 	}
 	config_update_envelope.signatures = signatures;
@@ -716,21 +750,20 @@ function decodeConfigUpdateEnvelope(config_update_envelope_bytes) {
 }
 
 function decodeConfigUpdate(config_update_bytes) {
-	var config_update = {};
-	var proto_config_update = _configtxProto.ConfigUpdate.decode(config_update_bytes);
+	const config_update = {};
+	const proto_config_update = _configtxProto.ConfigUpdate.decode(config_update_bytes);
 	config_update.channel_id = proto_config_update.getChannelId();
 	config_update.read_set = decodeConfigGroup(proto_config_update.getReadSet());
 	config_update.write_set = decodeConfigGroup(proto_config_update.getWriteSet());
-	config_update.type = proto_config_update.getType();
 
 	return config_update;
 }
 
 function decodeConfigGroups(config_group_map) {
-	var config_groups = {};
-	var keys = Object.keys(config_group_map.map);
+	const config_groups = {};
+	const keys = Object.keys(config_group_map.map);
 	for (let i = 0; i < keys.length; i++) {
-		let key = keys[i];
+		const key = keys[i];
 		config_groups[key] = decodeConfigGroup(config_group_map.map[key].value);
 	}
 
@@ -738,115 +771,171 @@ function decodeConfigGroups(config_group_map) {
 }
 
 function decodeConfigGroup(proto_config_group) {
-	if (!proto_config_group) return null;
-	var config_group = {};
+	if (!proto_config_group) {
+		return null;
+	}
+	const config_group = {};
 	config_group.version = decodeVersion(proto_config_group.getVersion());
 	config_group.groups = decodeConfigGroups(proto_config_group.getGroups());
 	config_group.values = decodeConfigValues(proto_config_group.getValues());
 	config_group.policies = decodeConfigPolicies(proto_config_group.getPolicies());
-	config_group.mod_policy = proto_config_group.getModPolicy(); //string
+	config_group.mod_policy = proto_config_group.getModPolicy(); // string
 	return config_group;
 }
 
 function decodeConfigValues(config_value_map) {
-	var config_values = {};
-	var keys = Object.keys(config_value_map.map);
+	const config_values = {};
+	const keys = Object.keys(config_value_map.map);
 	for (let i = 0; i < keys.length; i++) {
-		let key = keys[i];
+		const key = keys[i];
 		config_values[key] = decodeConfigValue(config_value_map.map[key]);
 	}
 
 	return config_values;
 }
 
-function decodeConfigValue(proto_config_value) {
-	var config_value = {};
-	logger.debug(' ======> Config item ::%s', proto_config_value.key);
-	config_value.version = decodeVersion(proto_config_value.value.getVersion());
-	config_value.mod_policy = proto_config_value.value.getModPolicy();
-	config_value.value = {};
-	switch(proto_config_value.key) {
-	case 'AnchorPeers':
-		var anchor_peers = [];
-		var proto_anchor_peers = _peerConfigurationProto.AnchorPeers.decode(proto_config_value.value.value);
-		if(proto_anchor_peers && proto_anchor_peers.anchor_peers) for(var i in proto_anchor_peers.anchor_peers) {
-			var anchor_peer = {
+function decodeConfigValueAnchorPeers(proto_config_value, config_value) {
+	const anchor_peers = [];
+	const proto_anchor_peers = _peerConfigurationProto.AnchorPeers.decode(proto_config_value.value.value);
+	if (proto_anchor_peers && proto_anchor_peers.anchor_peers) {
+		for (const i in proto_anchor_peers.anchor_peers) {
+			const anchor_peer = {
 				host : proto_anchor_peers.anchor_peers[i].host,
 				port : proto_anchor_peers.anchor_peers[i].port
 			};
 			anchor_peers.push(anchor_peer);
 		}
-		config_value.value.anchor_peers = anchor_peers;
-		break;
-	case 'MSP':
-		var msp_config = {};
-		var proto_msp_config = _mspConfigProto.MSPConfig.decode(proto_config_value.value.value);
-		if(proto_msp_config.getType() == 0) {
-			msp_config = decodeFabricMSPConfig(proto_msp_config.getConfig());
+	}
+	config_value.value.anchor_peers = anchor_peers;
+	return config_value;
+}
+
+function decodeConfigValueMSP(proto_config_value, config_value) {
+	let msp_config = {};
+	const proto_msp_config = _mspConfigProto.MSPConfig.decode(proto_config_value.value.value);
+	if (proto_msp_config.getType() === 0) {
+		msp_config = decodeFabricMSPConfig(proto_msp_config.getConfig());
+	}
+	config_value.value.type = proto_msp_config.type;
+	config_value.value.config = msp_config;
+	return config_value;
+}
+
+function decodeConfigValueConsensusType(proto_config_value, config_value) {
+	const proto_consensus_type = _ordererConfigurationProto.ConsensusType.decode(proto_config_value.value.value);
+	config_value.value.type = proto_consensus_type.getType(); // string
+	return config_value;
+}
+
+function decodeConfigValueBatchSize(proto_config_value, config_value) {
+	const proto_batch_size = _ordererConfigurationProto.BatchSize.decode(proto_config_value.value.value);
+	config_value.value.max_message_count = proto_batch_size.getMaxMessageCount(); // uint32
+	config_value.value.absolute_max_bytes = proto_batch_size.getAbsoluteMaxBytes(); // uint32
+	config_value.value.preferred_max_bytes = proto_batch_size.getPreferredMaxBytes(); // uint32
+	return config_value;
+}
+
+function decodeConfigValueBatchTimeout(proto_config_value, config_value) {
+	const proto_batch_timeout = _ordererConfigurationProto.BatchTimeout.decode(proto_config_value.value.value);
+	config_value.value.timeout = proto_batch_timeout.getTimeout(); // string
+	return config_value;
+}
+
+function decodeConfigValueChannelRestrictions(proto_config_value, config_value) {
+	const proto_channel_restrictions = _ordererConfigurationProto.ChannelRestrictions.decode(proto_config_value.value.value);
+	config_value.value.max_count = proto_channel_restrictions.getMaxCount().toString(); // unit64
+	return config_value;
+}
+
+function decodeConfigValueBlockDataConsortium(proto_config_value, config_value) {
+	const consortium_name = _commonConfigurationProto.Consortium.decode(proto_config_value.value.value);
+	config_value.value.name = consortium_name.getName(); // string
+	return config_value;
+}
+
+function decodeConfigValueHashingAlgorithm(proto_config_value, config_value) {
+	const proto_hashing_algorithm = _commonConfigurationProto.HashingAlgorithm.decode(proto_config_value.value.value);
+	config_value.value.name = proto_hashing_algorithm.getName();
+	return config_value;
+}
+
+function decodeConfigValueBlockDataHashingStructure(proto_config_value, config_value) {
+	const proto_blockdata_hashing_structure = _commonConfigurationProto.BlockDataHashingStructure.decode(proto_config_value.value.value);
+	config_value.value.width = proto_blockdata_hashing_structure.getWidth(); //
+	return config_value;
+}
+
+function decodeConfigValueOrdererAddresses(proto_config_value, config_value) {
+	const orderer_addresses = _commonConfigurationProto.OrdererAddresses.decode(proto_config_value.value.value);
+	const addresses = [];
+	const proto_addresses = orderer_addresses.getAddresses();
+	if (proto_addresses) {
+		for (const i in proto_addresses) {
+			addresses.push(proto_addresses[i]); // string
 		}
-		config_value.value.type = proto_msp_config.type;
-		config_value.value.config = msp_config;
-		break;
-	case 'ConsensusType':
-		var proto_consensus_type = _ordererConfigurationProto.ConsensusType.decode(proto_config_value.value.value);
-		config_value.value.type = proto_consensus_type.getType(); // string
-		break;
-	case 'BatchSize':
-		var proto_batch_size = _ordererConfigurationProto.BatchSize.decode(proto_config_value.value.value);
-		config_value.value.max_message_count = proto_batch_size.getMaxMessageCount(); //uint32
-		config_value.value.absolute_max_bytes = proto_batch_size.getAbsoluteMaxBytes(); //uint32
-		config_value.value.preferred_max_bytes = proto_batch_size.getPreferredMaxBytes(); //uint32
-		break;
-	case 'BatchTimeout':
-		var proto_batch_timeout = _ordererConfigurationProto.BatchTimeout.decode(proto_config_value.value.value);
-		config_value.value.timeout = proto_batch_timeout.getTimeout(); //string
-		break;
-	case 'ChannelRestrictions':
-		var proto_channel_restrictions = _ordererConfigurationProto.ChannelRestrictions.decode(proto_config_value.value.value);
-		config_value.value.max_count = proto_channel_restrictions.getMaxCount().toString(); //unit64
-		break;
-	case 'Consortium':
-		var consortium_name = _commonConfigurationProto.Consortium.decode(proto_config_value.value.value);
-		config_value.value.name = consortium_name.getName(); //string
-		break;
-	case 'HashingAlgorithm':
-		var proto_hashing_algorithm = _commonConfigurationProto.HashingAlgorithm.decode(proto_config_value.value.value);
-		config_value.value.name = proto_hashing_algorithm.getName();
-		break;
-	case 'BlockDataHashingStructure':
-		var proto_blockdata_hashing_structure = _commonConfigurationProto.BlockDataHashingStructure.decode(proto_config_value.value.value);
-		config_value.value.width = proto_blockdata_hashing_structure.getWidth(); //
-		break;
-	case 'OrdererAddresses':
-		var orderer_addresses = _commonConfigurationProto.OrdererAddresses.decode(proto_config_value.value.value);
-		var addresses = [];
-		var proto_addresses = orderer_addresses.getAddresses();
-		if(proto_addresses) for(let i in proto_addresses) {
-			addresses.push(proto_addresses[i]); //string
-		}
-		config_value.value.addresses = addresses;
-		break;
-	default:
+	}
+	config_value.value.addresses = addresses;
+	return config_value;
+}
+
+function decodeConfigValue(proto_config_value) {
+	let config_value = {};
+	logger.debug(' ======> Config item ::%s', proto_config_value.key);
+	config_value.version = decodeVersion(proto_config_value.value.getVersion());
+	config_value.mod_policy = proto_config_value.value.getModPolicy();
+	config_value.value = {};
+	switch (proto_config_value.key) {
+		case 'AnchorPeers':
+			config_value = decodeConfigValueAnchorPeers(proto_config_value, config_value);
+			break;
+		case 'MSP':
+			config_value = decodeConfigValueMSP(proto_config_value, config_value);
+			break;
+		case 'ConsensusType':
+			config_value = decodeConfigValueConsensusType(proto_config_value, config_value);
+			break;
+		case 'BatchSize':
+			config_value = decodeConfigValueBatchSize(proto_config_value, config_value);
+			break;
+		case 'BatchTimeout':
+			config_value = decodeConfigValueBatchTimeout(proto_config_value, config_value);
+			break;
+		case 'ChannelRestrictions':
+			config_value = decodeConfigValueChannelRestrictions(proto_config_value, config_value);
+			break;
+		case 'Consortium':
+			config_value = decodeConfigValueBlockDataConsortium(proto_config_value, config_value);
+			break;
+		case 'HashingAlgorithm':
+			config_value = decodeConfigValueHashingAlgorithm(proto_config_value, config_value);
+			break;
+		case 'BlockDataHashingStructure':
+			config_value = decodeConfigValueBlockDataHashingStructure(proto_config_value, config_value);
+			break;
+		case 'OrdererAddresses':
+			config_value = decodeConfigValueOrdererAddresses(proto_config_value, config_value);
+			break;
+		default:
 //		logger.debug('loadConfigValue - %s   - value: %s', group_name, config_value.value.value);
 	}
 	return config_value;
 }
 
 function decodeConfigPolicies(config_policy_map) {
-	var config_policies = {};
-	var keys = Object.keys(config_policy_map.map);
+	const config_policies = {};
+	const keys = Object.keys(config_policy_map.map);
 	for (let i = 0; i < keys.length; i++) {
-		let key = keys[i];
+		const key = keys[i];
 		config_policies[key] = decodeConfigPolicy(config_policy_map.map[key]);
 	}
 
 	return config_policies;
 }
 
-var Policy_PolicyType = ['UNKNOWN', 'SIGNATURE', 'MSP', 'IMPLICIT_META'];
+const Policy_PolicyType = ['UNKNOWN', 'SIGNATURE', 'MSP', 'IMPLICIT_META'];
 
 function decodeConfigPolicy(proto_config_policy) {
-	var config_policy = {};
+	const config_policy = {};
 	config_policy.version = decodeVersion(proto_config_policy.value.getVersion());
 	config_policy.mod_policy = proto_config_policy.value.getModPolicy();
 	config_policy.policy = {};
@@ -854,64 +943,65 @@ function decodeConfigPolicy(proto_config_policy) {
 		config_policy.policy.type = Policy_PolicyType[proto_config_policy.value.policy.type];
 		logger.debug('decodeConfigPolicy ======> Policy item ::%s', proto_config_policy.key);
 		switch (proto_config_policy.value.policy.type) {
-		case _policiesProto.Policy.PolicyType.SIGNATURE:
-			config_policy.policy.value = decodeSignaturePolicyEnvelope(proto_config_policy.value.policy.value);
-			break;
-		case _policiesProto.Policy.PolicyType.MSP:
-			var proto_msp = _policiesProto.Policy.decode(proto_config_policy.value.policy.value);
-			logger.warn('decodeConfigPolicy - found a PolicyType of MSP. This policy type has not been implemented yet.');
-			break;
-		case _policiesProto.Policy.PolicyType.IMPLICIT_META:
-			config_policy.policy.value = decodeImplicitMetaPolicy(proto_config_policy.value.policy.value);
-			break;
-		default:
-			throw new Error('Unknown Policy type');
+			case _policiesProto.Policy.PolicyType.SIGNATURE:
+				config_policy.policy.value = decodeSignaturePolicyEnvelope(proto_config_policy.value.policy.value);
+				break;
+			case _policiesProto.Policy.PolicyType.MSP:
+			// var proto_msp = _policiesProto.Policy.decode(proto_config_policy.value.policy.value);
+				logger.warn('decodeConfigPolicy - found a PolicyType of MSP. This policy type has not been implemented yet.');
+				break;
+			case _policiesProto.Policy.PolicyType.IMPLICIT_META:
+				config_policy.policy.value = decodeImplicitMetaPolicy(proto_config_policy.value.policy.value);
+				break;
+			default:
+				throw new Error('Unknown Policy type');
 		}
 	}
 
 	return config_policy;
 }
 
-var ImplicitMetaPolicy_Rule = ['ANY', 'ALL', 'MAJORITY'];
+const ImplicitMetaPolicy_Rule = ['ANY', 'ALL', 'MAJORITY'];
 
 function decodeImplicitMetaPolicy(implicit_meta_policy_bytes) {
-	var implicit_meta_policy = {};
-	var proto_implicit_meta_policy = _policiesProto.ImplicitMetaPolicy.decode(implicit_meta_policy_bytes);
+	const implicit_meta_policy = {};
+	const proto_implicit_meta_policy = _policiesProto.ImplicitMetaPolicy.decode(implicit_meta_policy_bytes);
 	implicit_meta_policy.sub_policy = proto_implicit_meta_policy.getSubPolicy();
 	implicit_meta_policy.rule = ImplicitMetaPolicy_Rule[proto_implicit_meta_policy.getRule()];
 	return implicit_meta_policy;
 }
 
 function decodeSignaturePolicyEnvelope(signature_policy_envelope_bytes) {
-	var signature_policy_envelope = {};
-	var proto_signature_policy_envelope = _policiesProto.SignaturePolicyEnvelope.decode(signature_policy_envelope_bytes);
+	const signature_policy_envelope = {};
+	const proto_signature_policy_envelope = _policiesProto.SignaturePolicyEnvelope.decode(signature_policy_envelope_bytes);
 	signature_policy_envelope.version = decodeVersion(proto_signature_policy_envelope.getVersion());
 	signature_policy_envelope.rule = decodeSignaturePolicy(proto_signature_policy_envelope.getRule());
-	var identities = [];
-	var proto_identities = proto_signature_policy_envelope.getIdentities();
-	if (proto_identities)
-		for (var i in proto_identities) {
-			var msp_principal = decodeMSPPrincipal(proto_identities[i]);
-			identities.push(msp_principal); //string
+	const identities = [];
+	const proto_identities = proto_signature_policy_envelope.getIdentities();
+	if (proto_identities) {
+		for (const i in proto_identities) {
+			const msp_principal = decodeMSPPrincipal(proto_identities[i]);
+			identities.push(msp_principal); // string
 		}
+	}
 	signature_policy_envelope.identities = identities;
 
 	return signature_policy_envelope;
 }
 
 function decodeSignaturePolicy(proto_signature_policy) {
-	var signature_policy = {};
+	const signature_policy = {};
 	signature_policy.Type = proto_signature_policy.Type;
-	if (signature_policy.Type == 'n_out_of') {
+	if (signature_policy.Type === 'n_out_of') {
 		signature_policy.n_out_of = {};
 		signature_policy.n_out_of.N = proto_signature_policy.n_out_of.getN();
 		signature_policy.n_out_of.rules = [];
-		for (var i in proto_signature_policy.n_out_of.rules) {
-			var proto_policy = proto_signature_policy.n_out_of.rules[i];
-			var policy = decodeSignaturePolicy(proto_policy);
+		for (const i in proto_signature_policy.n_out_of.rules) {
+			const proto_policy = proto_signature_policy.n_out_of.rules[i];
+			const policy = decodeSignaturePolicy(proto_policy);
 			signature_policy.n_out_of.rules.push(policy);
 		}
-	} else if (signature_policy.Type == 'signed_by') {
+	} else if (signature_policy.Type === 'signed_by') {
 		signature_policy.signed_by = proto_signature_policy.getSignedBy();
 	} else {
 		throw new Error('unknown signature policy type');
@@ -921,45 +1011,44 @@ function decodeSignaturePolicy(proto_signature_policy) {
 }
 
 function decodeMSPPrincipal(proto_msp_principal) {
-	var msp_principal = {};
+	let msp_principal = {};
 	msp_principal.principal_classification = proto_msp_principal.getPrincipalClassification();
-	var proto_principal = null;
+	let proto_principal = null;
 	switch (msp_principal.principal_classification) {
-	case _mspPrProto.MSPPrincipal.Classification.ROLE:
-		proto_principal = _mspPrProto.MSPRole.decode(proto_msp_principal.getPrincipal());
-		msp_principal.msp_identifier = proto_principal.getMspIdentifier();
-		if (proto_principal.getRole() === 0) {
-			msp_principal.Role = 'MEMBER';
-		} else if (proto_principal.getRole() === 1) {
-			msp_principal.Role = 'ADMIN';
-		}
-		break;
-	case _mspPrProto.MSPPrincipal.Classification.ORGANIZATION_UNIT:
-		proto_principal = _mspPrProto.OrganizationUnit.decode(proto_msp_principal.getPrincipal());
-		msp_principal.msp_identifier = proto_principal.getMspIdentifier(); //string
-		msp_principal.organizational_unit_identifier = proto_principal.getOrganizationalUnitIdentifier(); //string
-		msp_principal.certifiers_identifier = proto_principal.getCertifiersIdentifier().toBuffer(); //bytes
-		break;
-	case _mspPrProto.MSPPrincipal.Classification.IDENTITY:
-		msp_principal = decodeIdentity(proto_msp_principal.getPrincipal());
-		break;
+		case _mspPrProto.MSPPrincipal.Classification.ROLE:
+			proto_principal = _mspPrProto.MSPRole.decode(proto_msp_principal.getPrincipal());
+			msp_principal.msp_identifier = proto_principal.getMspIdentifier();
+			if (proto_principal.getRole() === 0) {
+				msp_principal.Role = 'MEMBER';
+			} else if (proto_principal.getRole() === 1) {
+				msp_principal.Role = 'ADMIN';
+			}
+			break;
+		case _mspPrProto.MSPPrincipal.Classification.ORGANIZATION_UNIT:
+			proto_principal = _mspPrProto.OrganizationUnit.decode(proto_msp_principal.getPrincipal());
+			msp_principal.msp_identifier = proto_principal.getMspIdentifier(); // string
+			msp_principal.organizational_unit_identifier = proto_principal.getOrganizationalUnitIdentifier(); // string
+			msp_principal.certifiers_identifier = proto_principal.getCertifiersIdentifier().toBuffer(); // bytes
+			break;
+		case _mspPrProto.MSPPrincipal.Classification.IDENTITY:
+			msp_principal = decodeIdentity(proto_msp_principal.getPrincipal());
+			break;
 	}
 
 	return msp_principal;
 }
 
 function decodeConfigSignature(proto_configSignature) {
-	var config_signature = {};
+	const config_signature = {};
 	config_signature.signature_header = decodeSignatureHeader(proto_configSignature.getSignatureHeader().toBuffer());
 	config_signature.sigature = proto_configSignature.getSignature().toBuffer();
-
 	return config_signature;
 }
 
 function decodeSignatureHeader(signature_header_bytes) {
-	//logger.debug('decodeSignatureHeader - %s',signature_header_bytes);
-	var signature_header = {};
-	var proto_signature_header = _commonProto.SignatureHeader.decode(signature_header_bytes);
+	// logger.debug('decodeSignatureHeader - %s',signature_header_bytes);
+	const signature_header = {};
+	const proto_signature_header = _commonProto.SignatureHeader.decode(signature_header_bytes);
 	signature_header.creator = decodeIdentity(proto_signature_header.getCreator().toBuffer());
 	signature_header.nonce = proto_signature_header.getNonce().toBuffer();
 
@@ -967,22 +1056,22 @@ function decodeSignatureHeader(signature_header_bytes) {
 }
 
 function decodeIdentity(id_bytes) {
-	//logger.debug('decodeIdentity - %s',id_bytes);
-	var identity = {};
+	// logger.debug('decodeIdentity - %s',id_bytes);
+	const identity = {};
 	try {
-		var proto_identity = _identityProto.SerializedIdentity.decode(id_bytes);
+		const proto_identity = _identityProto.SerializedIdentity.decode(id_bytes);
 		identity.Mspid = proto_identity.getMspid();
 		identity.IdBytes = proto_identity.getIdBytes().toBuffer().toString();
 	} catch (err) {
-		logger.error('Failed to decode the identity: %s', err.stack ? err.stack : err);
+		logger.error('Failed to decode the identity: %s', (err.stack ? err.stack : err));
 	}
 
 	return identity;
 }
 
 function decodeFabricMSPConfig(msp_config_bytes) {
-	var msp_config = {};
-	var proto_msp_config = _mspConfigProto.FabricMSPConfig.decode(msp_config_bytes);
+	const msp_config = {};
+	const proto_msp_config = _mspConfigProto.FabricMSPConfig.decode(msp_config_bytes);
 
 	msp_config.name = proto_msp_config.getName();
 	msp_config.root_certs = toPEMcerts(proto_msp_config.getRootCerts());
@@ -998,11 +1087,11 @@ function decodeFabricMSPConfig(msp_config_bytes) {
 }
 
 function decodeFabricOUIdentifier(proto_organizational_unit_identitfiers) {
-	var organizational_unit_identitfiers = [];
+	const organizational_unit_identitfiers = [];
 	if (proto_organizational_unit_identitfiers) {
 		for (let i = 0; i < proto_organizational_unit_identitfiers.length; i++) {
-			var proto_organizational_unit_identitfier = proto_organizational_unit_identitfiers[i];
-			var organizational_unit_identitfier = {};
+			const proto_organizational_unit_identitfier = proto_organizational_unit_identitfiers[i];
+			const organizational_unit_identitfier = {};
 			organizational_unit_identitfier.certificate =
 				proto_organizational_unit_identitfier.getCertificate().toBuffer().toString();
 			organizational_unit_identitfier.organizational_unit_identifier =
@@ -1015,8 +1104,8 @@ function decodeFabricOUIdentifier(proto_organizational_unit_identitfiers) {
 }
 
 function toPEMcerts(buffer_array_in) {
-	var buffer_array_out = [];
-	for (var i in buffer_array_in) {
+	const buffer_array_out = [];
+	for (const i in buffer_array_in) {
 		buffer_array_out.push(buffer_array_in[i].toBuffer().toString());
 	}
 
@@ -1024,9 +1113,9 @@ function toPEMcerts(buffer_array_in) {
 }
 
 function decodeSigningIdentityInfo(signing_identity_info_bytes) {
-	var signing_identity_info = {};
+	const signing_identity_info = {};
 	if (signing_identity_info_bytes) {
-		var proto_signing_identity_info = _mspConfigProto.SigningIdentityInfo.decode(signing_identity_info_bytes);
+		const proto_signing_identity_info = _mspConfigProto.SigningIdentityInfo.decode(signing_identity_info_bytes);
 		signing_identity_info.public_signer = proto_signing_identity_info.getPublicSigner().toBuffer().toString();
 		signing_identity_info.private_signer = decodeKeyInfo(proto_signing_identity_info.getPrivateSigner());
 	}
@@ -1035,18 +1124,18 @@ function decodeSigningIdentityInfo(signing_identity_info_bytes) {
 }
 
 function decodeKeyInfo(key_info_bytes) {
-	var key_info = {};
+	const key_info = {};
 	if (key_info_bytes) {
-		var proto_key_info = _mspConfigProto.KeyInfo.decode(key_info_bytes);
+		const proto_key_info = _mspConfigProto.KeyInfo.decode(key_info_bytes);
 		key_info.key_identifier = proto_key_info.getKeyIdentifier();
-		key_info.key_material = 'private'; //should not show this
+		key_info.key_material = 'private'; // should not show this
 	}
 
 	return key_info;
 }
 
 function decodeHeader(proto_header) {
-	var header = {};
+	const header = {};
 	header.channel_header = decodeChannelHeader(proto_header.getChannelHeader().toBuffer());
 	header.signature_header = decodeSignatureHeader(proto_header.getSignatureHeader().toBuffer());
 
@@ -1054,34 +1143,34 @@ function decodeHeader(proto_header) {
 }
 
 function decodeChannelHeader(header_bytes) {
-	var channel_header = {};
-	var proto_channel_header = _commonProto.ChannelHeader.decode(header_bytes);
+	const channel_header = {};
+	const proto_channel_header = _commonProto.ChannelHeader.decode(header_bytes);
 	channel_header.type = proto_channel_header.getType();
-	logger.debug('decodeChannelHeader - looking at type:%s',channel_header.type);
+	logger.debug('decodeChannelHeader - looking at type:%s', channel_header.type);
 	channel_header.version = decodeVersion(proto_channel_header.getVersion());
 	channel_header.timestamp = timeStampToDate(proto_channel_header.getTimestamp());
 	channel_header.channel_id = proto_channel_header.getChannelId();
 	channel_header.tx_id = proto_channel_header.getTxId();
-	channel_header.epoch = proto_channel_header.getEpoch().toString(); //unit64
-	//TODO need to decode this
+	channel_header.epoch = proto_channel_header.getEpoch().toString(); // unit64
+	// TODO need to decode this
 	channel_header.extension = proto_channel_header.getExtension().toBuffer();
 
 	return channel_header;
 }
 
 function timeStampToDate(time_stamp) {
-	if(!time_stamp) {
+	if (!time_stamp) {
 		return 'null';
 	}
-	var millis = time_stamp.seconds * 1000 + time_stamp.nanos / 1000000;
-	var date = new Date(millis);
+	const millis = time_stamp.seconds * 1000 + time_stamp.nanos / 1000000;
+	const date = new Date(millis);
 
-	return date.toString();
+	return date.toISOString();
 }
 
 function decodeChaincodeActionPayload(payload_bytes) {
-	var payload = {};
-	var proto_chaincode_action_payload = _transProto.ChaincodeActionPayload.decode(payload_bytes);
+	const payload = {};
+	const proto_chaincode_action_payload = _transProto.ChaincodeActionPayload.decode(payload_bytes);
 	payload.chaincode_proposal_payload = decodeChaincodeProposalPayload(proto_chaincode_action_payload.getChaincodeProposalPayload());
 	payload.action = decodeChaincodeEndorsedAction(proto_chaincode_action_payload.getAction());
 
@@ -1089,20 +1178,79 @@ function decodeChaincodeActionPayload(payload_bytes) {
 }
 
 function decodeChaincodeProposalPayload(chaincode_proposal_payload_bytes) {
-	var chaincode_proposal_payload = {};
-	var proto_chaincode_proposal_payload = _proposalProto.ChaincodeProposalPayload.decode(chaincode_proposal_payload_bytes);
-	chaincode_proposal_payload.input = proto_chaincode_proposal_payload.getInput().toBuffer();
-	//TransientMap is not allowed to be included on ledger
+	const chaincode_proposal_payload = {};
+	const proto_chaincode_proposal_payload = _proposalProto.ChaincodeProposalPayload.decode(chaincode_proposal_payload_bytes);
+	chaincode_proposal_payload.input = decodeChaincodeProposalPayloadInput(proto_chaincode_proposal_payload.getInput());
+	// TransientMap is not allowed to be included on ledger
 
 	return chaincode_proposal_payload;
 }
 
+function decodeChaincodeProposalPayloadInput(chaincode_proposal_payload_input_bytes) {
+	const chaincode_proposal_payload_input = {};
+
+	// For a normal transaction, input is ChaincodeInvocationSpec.
+	const proto_chaincode_invocation_spec = _chaincodeProto.ChaincodeInvocationSpec.decode(chaincode_proposal_payload_input_bytes);
+	chaincode_proposal_payload_input.chaincode_spec = decodeChaincodeSpec(proto_chaincode_invocation_spec.getChaincodeSpec().toBuffer());
+
+	return chaincode_proposal_payload_input;
+}
+
+const chaincode_type_as_string = {
+	0: 'UNDEFINED',
+	1: 'GOLANG',
+	2: 'NODE',
+	3: 'CAR',
+	4: 'JAVA'
+};
+
+function chaincodeTypeToString(type) {
+	const type_str = chaincode_type_as_string[type];
+	if (typeof type_str === 'undefined') {
+		return 'UNKNOWN';
+	} else {
+		return type_str;
+	}
+}
+
+function decodeChaincodeSpec(chaincode_spec_bytes) {
+	const chaincode_spec = {};
+	const proto_chaincode_spec = _chaincodeProto.ChaincodeSpec.decode(chaincode_spec_bytes);
+	chaincode_spec.type = proto_chaincode_spec.getType();
+	// Add a string for the chaincode type (GOLANG, NODE, etc.)
+	chaincode_spec.typeString = chaincodeTypeToString(chaincode_spec.type);
+	chaincode_spec.input = decodeChaincodeInput(proto_chaincode_spec.getInput().toBuffer());
+	chaincode_spec.chaincode_id = proto_chaincode_spec.getChaincodeId();
+	chaincode_spec.timeout = proto_chaincode_spec.getTimeout();
+
+	return chaincode_spec;
+}
+
+function decodeChaincodeInput(chaincode_spec_input_bytes) {
+	const input = {};
+	const proto_chaincode_input = _chaincodeProto.ChaincodeInput.decode(chaincode_spec_input_bytes);
+	const args = proto_chaincode_input.getArgs();
+
+	input.args = [];
+	for (const i in args) {
+		input.args.push(args[i].toBuffer());
+	}
+	const decorations = proto_chaincode_input.getDecorations();
+	const keys = Object.keys(decorations.map);
+	input.decorations = {};
+	for (const i in keys) {
+		input.decorations[keys[i]] = decorations.map[keys[i]].value.toBuffer();
+	}
+
+	return input;
+}
+
 function decodeChaincodeEndorsedAction(proto_chaincode_endorsed_action) {
-	var action = {};
+	const action = {};
 	action.proposal_response_payload = decodeProposalResponsePayload(proto_chaincode_endorsed_action.getProposalResponsePayload());
 	action.endorsements = [];
-	for (var i in proto_chaincode_endorsed_action.endorsements) {
-		var endorsement = decodeEndorsement(proto_chaincode_endorsed_action.endorsements[i]);
+	for (const i in proto_chaincode_endorsed_action.endorsements) {
+		const endorsement = decodeEndorsement(proto_chaincode_endorsed_action.endorsements[i]);
 		action.endorsements.push(endorsement);
 	}
 
@@ -1110,7 +1258,7 @@ function decodeChaincodeEndorsedAction(proto_chaincode_endorsed_action) {
 }
 
 function decodeEndorsement(proto_endorsement) {
-	var endorsement = {};
+	const endorsement = {};
 	endorsement.endorser = decodeIdentity(proto_endorsement.getEndorser());
 	endorsement.signature = proto_endorsement.getSignature().toBuffer();
 
@@ -1118,8 +1266,8 @@ function decodeEndorsement(proto_endorsement) {
 }
 
 function decodeProposalResponsePayload(proposal_response_payload_bytes) {
-	var proposal_response_payload = {};
-	var proto_proposal_response_payload = _responseProto.ProposalResponsePayload.decode(proposal_response_payload_bytes);
+	const proposal_response_payload = {};
+	const proto_proposal_response_payload = _responseProto.ProposalResponsePayload.decode(proposal_response_payload_bytes);
 	proposal_response_payload.proposal_hash = proto_proposal_response_payload.getProposalHash().toBuffer().toString('hex');
 	proposal_response_payload.extension = decodeChaincodeAction(proto_proposal_response_payload.getExtension());
 
@@ -1128,8 +1276,8 @@ function decodeProposalResponsePayload(proposal_response_payload_bytes) {
 
 function decodeChaincodeAction(action_bytes) {
 	logger.debug('decodeChaincodeAction - start');
-	var chaincode_action = {};
-	var proto_chaincode_action = _proposalProto.ChaincodeAction.decode(action_bytes);
+	const chaincode_action = {};
+	const proto_chaincode_action = _proposalProto.ChaincodeAction.decode(action_bytes);
 	chaincode_action.results = decodeReadWriteSets(proto_chaincode_action.getResults());
 	chaincode_action.events = decodeChaincodeEvents(proto_chaincode_action.getEvents());
 	chaincode_action.response = decodeResponse(proto_chaincode_action.getResponse());
@@ -1139,8 +1287,8 @@ function decodeChaincodeAction(action_bytes) {
 }
 
 function decodeChaincodeEvents(event_bytes) {
-	var events = {};
-	var proto_events = _ccEventProto.ChaincodeEvent.decode(event_bytes);
+	const events = {};
+	const proto_events = _ccEventProto.ChaincodeEvent.decode(event_bytes);
 	events.chaincode_id = proto_events.getChaincodeId();
 	events.tx_id = proto_events.getTxId();
 	events.event_name = proto_events.getEventName();
@@ -1150,8 +1298,8 @@ function decodeChaincodeEvents(event_bytes) {
 }
 
 function decodeChaincodeID(proto_chaincode_id) {
-	var chaincode_id = {};
-	if(!proto_chaincode_id) {
+	const chaincode_id = {};
+	if (!proto_chaincode_id) {
 		logger.debug('decodeChaincodeID - no proto_chaincode_id found');
 		return chaincode_id;
 	}
@@ -1164,17 +1312,18 @@ function decodeChaincodeID(proto_chaincode_id) {
 }
 
 function decodeReadWriteSets(rw_sets_bytes) {
-	var proto_tx_read_write_set = _rwsetProto.TxReadWriteSet.decode(rw_sets_bytes);
-	var tx_read_write_set = {};
+	const proto_tx_read_write_set = _rwsetProto.TxReadWriteSet.decode(rw_sets_bytes);
+	const tx_read_write_set = {};
 	tx_read_write_set.data_model = proto_tx_read_write_set.getDataModel();
 	if (proto_tx_read_write_set.getDataModel() === _rwsetProto.TxReadWriteSet.DataModel.KV) {
 		tx_read_write_set.ns_rwset = [];
-		let proto_ns_rwset = proto_tx_read_write_set.getNsRwset();
-		for (let i in proto_ns_rwset) {
-			let kv_rw_set = {};
-			let proto_kv_rw_set = proto_ns_rwset[i];
+		const proto_ns_rwset = proto_tx_read_write_set.getNsRwset();
+		for (const i in proto_ns_rwset) {
+			const kv_rw_set = {};
+			const proto_kv_rw_set = proto_ns_rwset[i];
 			kv_rw_set.namespace = proto_kv_rw_set.getNamespace();
 			kv_rw_set.rwset = decodeKVRWSet(proto_kv_rw_set.getRwset());
+			kv_rw_set.collection_hashed_rwset = decodeCollectionHashedRWSet(proto_kv_rw_set.getCollectionHashedRwset());
 			tx_read_write_set.ns_rwset.push(kv_rw_set);
 		}
 	} else {
@@ -1186,42 +1335,50 @@ function decodeReadWriteSets(rw_sets_bytes) {
 }
 
 function decodeKVRWSet(kv_bytes) {
-	var proto_kv_rw_set = _kv_rwsetProto.KVRWSet.decode(kv_bytes);
-	var kv_rw_set = {};
+	const proto_kv_rw_set = _kv_rwsetProto.KVRWSet.decode(kv_bytes);
+	const kv_rw_set = {};
 
 	// KV readwrite set has three arrays
 	kv_rw_set.reads = [];
 	kv_rw_set.range_queries_info = [];
 	kv_rw_set.writes = [];
+	kv_rw_set.metadata_writes = [];
 
 	// build reads
-	let reads = kv_rw_set.reads;
-	var proto_reads = proto_kv_rw_set.getReads();
-	for (let i in proto_reads) {
+	const reads = kv_rw_set.reads;
+	const proto_reads = proto_kv_rw_set.getReads();
+	for (const i in proto_reads) {
 		reads.push(decodeKVRead(proto_reads[i]));
 	}
 
 	// build range_queries_info
-	let range_queries_info = kv_rw_set.range_queries_info;
-	var proto_range_queries_info = proto_kv_rw_set.getRangeQueriesInfo();
-	for (let i in proto_range_queries_info) {
+	const range_queries_info = kv_rw_set.range_queries_info;
+	const proto_range_queries_info = proto_kv_rw_set.getRangeQueriesInfo();
+	for (const i in proto_range_queries_info) {
 		range_queries_info.push(decodeRangeQueryInfo(proto_range_queries_info[i]));
 	}
 
 	// build writes
-	let writes = kv_rw_set.writes;
-	var proto_writes = proto_kv_rw_set.getWrites();
-	for (let i in proto_writes) {
+	const writes = kv_rw_set.writes;
+	const proto_writes = proto_kv_rw_set.getWrites();
+	for (const i in proto_writes) {
 		writes.push(decodeKVWrite(proto_writes[i]));
+	}
+
+	// build metadata writes
+	const metadata_writes = kv_rw_set.metadata_writes;
+	const proto_metadata_writes = proto_kv_rw_set.getMetadataWrites();
+	for (const i in proto_metadata_writes) {
+		metadata_writes.push(decodeKVMetadataWrite(proto_metadata_writes[i]));
 	}
 
 	return kv_rw_set;
 }
 
 function decodeKVRead(proto_kv_read) {
-	let kv_read = {};
+	const kv_read = {};
 	kv_read.key = proto_kv_read.getKey();
-	let proto_version = proto_kv_read.getVersion();
+	const proto_version = proto_kv_read.getVersion();
 	if (proto_version) {
 		kv_read.version = {};
 		kv_read.version.block_num = proto_version.getBlockNum().toString();
@@ -1234,23 +1391,23 @@ function decodeKVRead(proto_kv_read) {
 }
 
 function decodeRangeQueryInfo(proto_range_query_info) {
-	let range_query_info = {};
+	const range_query_info = {};
 	range_query_info.start_key = proto_range_query_info.getStartKey();
 	range_query_info.end_key = proto_range_query_info.getEndKey();
 	range_query_info.itr_exhausted = proto_range_query_info.getItrExhausted();
 
 	// reads_info is one of QueryReads
-	let proto_raw_reads = proto_range_query_info.getRawReads();
+	const proto_raw_reads = proto_range_query_info.getRawReads();
 	if (proto_raw_reads) {
 		range_query_info.raw_reads = {};
 		range_query_info.raw_reads.kv_reads = [];
-		for (let i in proto_raw_reads.kv_reads) {
-			let kv_read = decodeKVRead(proto_raw_reads.kv_reads[i]);
+		for (const i in proto_raw_reads.kv_reads) {
+			const kv_read = decodeKVRead(proto_raw_reads.kv_reads[i]);
 			range_query_info.raw_reads.kv_reads.push(kv_read);
 		}
 	}
 	// or QueryReadsMerkleSummary
-	let proto_reads_merkle_hashes = proto_range_query_info.getReadsMerkleHashes();
+	const proto_reads_merkle_hashes = proto_range_query_info.getReadsMerkleHashes();
 	if (proto_reads_merkle_hashes) {
 		range_query_info.reads_merkle_hashes = {};
 		range_query_info.reads_merkle_hashes.max_degree = proto_reads_merkle_hashes.getMaxDegree();
@@ -1262,7 +1419,7 @@ function decodeRangeQueryInfo(proto_range_query_info) {
 }
 
 function decodeKVWrite(proto_kv_write) {
-	let kv_write = {};
+	const kv_write = {};
 	kv_write.key = proto_kv_write.getKey();
 	kv_write.is_delete = proto_kv_write.getIsDelete();
 	kv_write.value = proto_kv_write.getValue().toBuffer().toString();
@@ -1270,9 +1427,34 @@ function decodeKVWrite(proto_kv_write) {
 	return kv_write;
 }
 
+function decodeKVMetadataWrite(proto_kv_metadata_write) {
+	const kv_metadata_write = {};
+
+	kv_metadata_write.key = proto_kv_metadata_write.getKey();
+
+	const proto_kv_metadata_entries = proto_kv_metadata_write.getEntries();
+	kv_metadata_write.entries = [];
+	for (const i in proto_kv_metadata_entries) {
+		kv_metadata_write.entries.push(decodeKVMetadataEntry(proto_kv_metadata_entries[i]));
+	}
+
+	return kv_metadata_write;
+}
+
+function decodeKVMetadataEntry(proto_kv_metadata_entry) {
+	const kv_metadata_entry = {};
+
+	kv_metadata_entry.name = proto_kv_metadata_entry.getName();
+	kv_metadata_entry.value = proto_kv_metadata_entry.getValue().toBuffer();
+
+	return kv_metadata_entry;
+}
+
 function decodeResponse(proto_response) {
-	if (!proto_response) return null;
-	var response = {};
+	if (!proto_response) {
+		return null;
+	}
+	const response = {};
 	response.status = proto_response.getStatus();
 	response.message = proto_response.getMessage();
 	response.payload = proto_response.getPayload().toBuffer().toString();
@@ -1283,10 +1465,87 @@ function decodeResponse(proto_response) {
 // version numbers should not get that big
 // so lets just return an Integer (32bits)
 function decodeVersion(version_long) {
-	var version_string = version_long.toString();
-	var version_int = Number.parseInt(version_string);
+	const version_string = version_long.toString();
+	const version_int = Number.parseInt(version_string);
 
 	return version_int;
+}
+
+function decodeCollectionHashedRWSet(proto_collection_hashed_rwset) {
+	const collection_hashed_rwset = [];
+	for (const i in proto_collection_hashed_rwset) {
+		const proto_collection = proto_collection_hashed_rwset[i];
+		const collection = {};
+
+		collection.collection_name = proto_collection.getCollectionName();
+		collection.hashed_rwset = decodeHashedRwset(proto_collection.getHashedRwset().toBuffer());
+		collection.pvt_rwset_hash = proto_collection.getPvtRwsetHash().toBuffer();
+
+		collection_hashed_rwset.push(collection);
+	}
+	return collection_hashed_rwset;
+}
+
+function decodeHashedRwset(hashed_rwset_bytes) {
+	const proto_hashed_rwset = _kv_rwsetProto.HashedRWSet.decode(hashed_rwset_bytes);
+	const hashed_rwset = {};
+
+	const proto_hashed_reads = proto_hashed_rwset.getHashedReads();
+	hashed_rwset.hashed_reads = [];
+	for (const i in proto_hashed_reads) {
+		hashed_rwset.hashed_reads.push(decodeKVReadHash(proto_hashed_reads[i]));
+	}
+
+	const proto_hashed_writes = proto_hashed_rwset.getHashedWrites();
+	hashed_rwset.hashed_writes = [];
+	for (const i in proto_hashed_writes) {
+		hashed_rwset.hashed_writes.push(decodeKVWriteHash(proto_hashed_writes[i]));
+	}
+
+	const proto_hashed_metadata_writes = proto_hashed_rwset.getMetadataWrites();
+	hashed_rwset.metadata_writes = [];
+	for (const i in proto_hashed_metadata_writes) {
+		hashed_rwset.metadata_writes.push(decodeKVMetadataWriteHash(proto_hashed_metadata_writes[i]));
+	}
+	return hashed_rwset;
+}
+
+function decodeKVReadHash(proto_kv_read_hash) {
+	const kv_read_hash = {};
+	kv_read_hash.key_hash = proto_kv_read_hash.getKeyHash().toBuffer();
+	const proto_version = proto_kv_read_hash.getVersion();
+	if (proto_version) {
+		kv_read_hash.version = {};
+		kv_read_hash.version.block_num = proto_version.getBlockNum().toString();
+		kv_read_hash.version.tx_num = proto_version.getTxNum().toString();
+	} else {
+		kv_read_hash.version = null;
+	}
+
+	return kv_read_hash;
+}
+
+function decodeKVWriteHash(proto_kv_write_hash) {
+	const kv_write_hash = {};
+	kv_write_hash.key_hash = proto_kv_write_hash.getKeyHash().toBuffer();
+	kv_write_hash.is_delete = proto_kv_write_hash.getIsDelete();
+	kv_write_hash.value_hash = proto_kv_write_hash.getValueHash().toBuffer();
+
+	return kv_write_hash;
+}
+
+function decodeKVMetadataWriteHash(proto_kv_metadata_write_hash) {
+	const kv_metadata_write_hash = {};
+
+	kv_metadata_write_hash.key_hash = proto_kv_metadata_write_hash.getKeyHash().toBuffer();
+
+	const proto_kv_metadata_entries = proto_kv_metadata_write_hash.getEntries();
+	kv_metadata_write_hash.entries = [];
+	for (const i in proto_kv_metadata_entries) {
+		kv_metadata_write_hash.entries.push(decodeKVMetadataEntry(proto_kv_metadata_entries[i]));
+	}
+
+	return kv_metadata_write_hash;
 }
 
 const type_as_string = {
@@ -1299,15 +1558,15 @@ const type_as_string = {
 	6: 'CHAINCODE_PACKAGE' // Used for packaging chaincode artifacts for install
 };
 
-var HeaderType = class {
+const HeaderType = class {
 	static convertToString(type) {
 		let result = null;
 		try {
 			result = type_as_string[type];
-		} catch(error) {
-			logger.error('HeaderType conversion - unknown headertype - %s',type);
+		} catch (error) {
+			logger.error('HeaderType conversion - unknown headertype - %s', type);
 		}
-		if(!result) {
+		if (!result) {
 			result = 'UNKNOWN_TYPE';
 		}
 		return result;
@@ -1315,22 +1574,22 @@ var HeaderType = class {
 
 	static decodePayloadBasedOnType(proto_data, type) {
 		let result = null;
-		switch(type) {
-		case 1:
-			result = decodeConfigEnvelope(proto_data);
-			break;
-		case 2:
-			result = decodeConfigUpdateEnvelope(proto_data);
-			break;
-		case 3:
-			result = decodeEndorserTransaction(proto_data);
-			break;
-		default:
-			logger.debug(' ***** found a header type of %s :: %s', type, HeaderType.convertToString(type));
-			// return empty data on types we do not know so that
-			// event processing may continue on blocks we do not
-			// care about
-			result = {};
+		switch (type) {
+			case 1:
+				result = decodeConfigEnvelope(proto_data);
+				break;
+			case 2:
+				result = decodeConfigUpdateEnvelope(proto_data);
+				break;
+			case 3:
+				result = decodeEndorserTransaction(proto_data);
+				break;
+			default:
+				logger.debug(' ***** found a header type of %s :: %s', type, HeaderType.convertToString(type));
+				// return empty data on types we do not know so that
+				// event processing may continue on blocks we do not
+				// care about
+				result = {};
 		}
 
 		return result;

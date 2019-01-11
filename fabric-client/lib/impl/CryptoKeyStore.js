@@ -1,41 +1,29 @@
 /*
- Copyright 2016-2017 IBM All Rights Reserved.
+ Copyright 2016, 2018 IBM All Rights Reserved.
 
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
+ SPDX-License-Identifier: Apache-2.0
 
-	  http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
 */
 
 'use strict';
 
-var sm2 = require('sm2');
-// var sm2 = require('jsrsasign');
+const sm2 = require('sm2');
 var SM2 = sm2.SM2;
-var KEYUTIL = sm2.KEYUTIL;
-var util = require('util');
-var utils = require('../utils.js');
+const KEYUTIL = sm2.KEYUTIL;
+
+const utils = require('../utils.js');
 var SM2_KEY = require('./sm2/key.js');
 var ASN1 = require('./asn1/ASN1')
 var Hex = require('./asn1/hex')
-
-var logger = utils.getLogger('CryptoKeyStore.js');
 
 /*
  * The mixin enforces the special indexing mechanism with private and public
  * keys on top of a standard implementation of the KeyValueStore interface
  * with the getKey() and putKey() methods
  */
-var CryptoKeyStoreMixin = (KeyValueStore) => class extends KeyValueStore {
+const CryptoKeyStoreMixin = (KeyValueStore) => class extends KeyValueStore {
 	getKey(ski) {
-		var self = this;
+		const self = this;
 
 		// first try the private key entry, since it encapsulates both
 		// the private key and public key
@@ -82,17 +70,12 @@ var CryptoKeyStoreMixin = (KeyValueStore) => class extends KeyValueStore {
 	}
 
 	putKey(key) {
-		try {
-			var idx = _getKeyIndex(key.getSKI(), key.isPrivate());
-			logger.debug(util.format("key before input %v ", key, " idx %s", idx));
-			var pem = key.toBytes();
-			return this.setValue(idx, pem)
-				.then(() => {
-					return key;
-				});
-		} catch (err) {
-			console.log(err)
-		}
+		const idx = _getKeyIndex(key.getSKI(), key.isPrivate());
+		const pem = key.toBytes();
+		return this.setValue(idx, pem)
+			.then(() => {
+				return key;
+			});
 	}
 };
 
@@ -108,12 +91,14 @@ var CryptoKeyStoreMixin = (KeyValueStore) => class extends KeyValueStore {
  *
  * @class
  */
-var CryptoKeyStore = function (KVSImplClass, opts) {
-	var superClass;
+const CryptoKeyStore = function (KVSImplClass, opts) {
+	let superClass;
 
 	if (typeof KVSImplClass !== 'function') {
 		let impl_class = utils.getConfigSetting('crypto-value-store');
-		if (!impl_class) impl_class = utils.getConfigSetting('key-value-store');
+		if (!impl_class) {
+			impl_class = utils.getConfigSetting('key-value-store');
+		}
 		superClass = require(impl_class);
 	} else {
 		superClass = KVSImplClass;
@@ -124,15 +109,16 @@ var CryptoKeyStore = function (KVSImplClass, opts) {
 		opts = KVSImplClass;
 	}
 
-	var MyClass = class extends CryptoKeyStoreMixin(superClass) { };
+	const MyClass = class extends CryptoKeyStoreMixin(superClass) { };
 	return new MyClass(opts);
 };
 
 function _getKeyIndex(ski, isPrivateKey) {
-	if (isPrivateKey)
+	if (isPrivateKey) {
 		return ski + '-priv';
-	else
+	} else {
 		return ski + '-pub';
+	}
 }
 var BI_RM = "0123456789abcdefghijklmnopqrstuvwxyz";
 function getHexFromPEM(sPEM, sHead) {

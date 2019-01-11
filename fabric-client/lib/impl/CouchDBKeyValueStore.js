@@ -1,27 +1,18 @@
 /*
- Copyright 2016 IBM All Rights Reserved.
+ Copyright 2016, 2018 IBM All Rights Reserved.
 
- Licensed under the Apache License, Version 2.0 (the 'License');
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
+ SPDX-License-Identifier: Apache-2.0
 
-	  http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an 'AS IS' BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
 */
 
 'use strict';
 
-var api = require('../api.js');
-var util = require('util');
-var utils = require('../utils');
-var nano = require('nano');
+const api = require('../api.js');
+const util = require('util');
+const utils = require('../utils');
+const nano = require('nano');
 
-var logger = utils.getLogger('CouchDBKeyValueStore.js');
+const logger = utils.getLogger('CouchDBKeyValueStore.js');
 
 /**
  * This is a sample database implementation of the [KeyValueStore]{@link module:api.KeyValueStore} API.
@@ -30,7 +21,7 @@ var logger = utils.getLogger('CouchDBKeyValueStore.js');
  * @class
  * @extends module:api.KeyValueStore
  */
-var CouchDBKeyValueStore = class extends api.KeyValueStore {
+const CouchDBKeyValueStore = class extends api.KeyValueStore {
 	/**
 	 * @typedef {Object} CouchDBOpts
 	 * @property {string} url The CouchDB instance url, in the form of http(s)://<user>:<password>@host:port
@@ -43,7 +34,7 @@ var CouchDBKeyValueStore = class extends api.KeyValueStore {
 	 * @param {CouchDBOpts} options Settings used to connect to a CouchDB instance
 	 */
 	constructor(options) {
-		logger.debug('constructor', { options: options });
+		logger.debug('constructor', {options: options});
 
 		if (!options || !options.url) {
 			throw new Error('Must provide the CouchDB database url to store membership data.');
@@ -52,7 +43,7 @@ var CouchDBKeyValueStore = class extends api.KeyValueStore {
 		// Create the keyValStore instance
 		super();
 
-		var self = this;
+		const self = this;
 		// url is the database instance url
 		this._url = options.url;
 		// Name of the database, optional
@@ -62,20 +53,20 @@ var CouchDBKeyValueStore = class extends api.KeyValueStore {
 			this._name = options.name;
 		}
 
-		return new Promise(function (resolve, reject) {
+		return new Promise(((resolve, reject) => {
 			// Initialize the CouchDB database client
-			var dbClient = nano(self._url);
+			const dbClient = nano(self._url);
 			// Check if the database already exists. If not, create it.
-			dbClient.db.get(self._name, function (err) {
+			dbClient.db.get(self._name, (err) => {
 				// Check for error
 				if (err) {
 					// Database doesn't exist
-					if (err.error == 'not_found') {
+					if (err.error === 'not_found') {
 						logger.debug('No %s found, creating %s', self._name, self._name);
 
-						dbClient.db.create(self._name, function (err) {
-							if (err) {
-								return reject(new Error(util.format('Failed to create %s database due to error: %s', self._name, err.stack ? err.stack : err)));
+						dbClient.db.create(self._name, (error) => {
+							if (error) {
+								return reject(new Error(util.format('Failed to create %s database due to error: %s', self._name, error.stack ? error.stack : error)));
 							}
 
 							logger.debug('Created %s database', self._name);
@@ -95,15 +86,15 @@ var CouchDBKeyValueStore = class extends api.KeyValueStore {
 					resolve(self);
 				}
 			});
-		});
+		}));
 	}
 
 	getValue(name) {
-		logger.debug('getValue', { key: name });
+		logger.debug('getValue', {key: name});
 
-		var self = this;
-		return new Promise(function (resolve, reject) {
-			self._database.get(name, function (err, body) {
+		const self = this;
+		return new Promise(((resolve, reject) => {
+			self._database.get(name, (err, body) => {
 				// Check for error on retrieving from database
 				if (err) {
 					if (err.error !== 'not_found') {
@@ -118,17 +109,17 @@ var CouchDBKeyValueStore = class extends api.KeyValueStore {
 					return resolve(body.member);
 				}
 			});
-		});
+		}));
 	}
 
 	setValue(name, value) {
-		logger.debug('setValue', { key: name });
+		logger.debug('setValue', {key: name});
 
-		var self = this;
+		const self = this;
 
-		return new Promise(function (resolve, reject) {
+		return new Promise(((resolve, reject) => {
 			// Attempt to retrieve from the database to see if the entry exists
-			self._database.get(name, function (err, body) {
+			self._database.get(name, (err, body) => {
 				// Check for error on retrieving from database
 				if (err) {
 					if (err.error !== 'not_found') {
@@ -137,11 +128,14 @@ var CouchDBKeyValueStore = class extends api.KeyValueStore {
 					} else {
 						// Entry does not exist
 						logger.debug('setValue: %s, Entry does not exist, insert it.', name);
-						self._dbInsert({ _id: name, member: value })
-							.then(function (status) {
+						self._dbInsert({_id: name, member: value})
+							.then((status) => {
 								logger.debug('setValue add: ' + name + ', status: ' + status);
-								if (status == true) resolve(value);
-								else reject(new Error('Couch database insert add failed.'));
+								if (status === true) {
+									resolve(value);
+								} else {
+									reject(new Error('Couch database insert add failed.'));
+								}
 							});
 					}
 				} else {
@@ -149,22 +143,25 @@ var CouchDBKeyValueStore = class extends api.KeyValueStore {
 					// Update the database entry using the latest rev number
 					logger.debug('setValue: %s, Retrieved entry from %s. Latest rev number: %s', name, self._name, body._rev);
 
-					self._dbInsert({ _id: name, _rev: body._rev, member: value })
-						.then(function (status) {
+					self._dbInsert({_id: name, _rev: body._rev, member: value})
+						.then((status) => {
 							logger.debug('setValue update: ' + name + ', status: ' + status);
-							if (status == true) resolve(value);
-							else reject(new Error('Couch database insert update failed.'));
+							if (status === true) {
+								resolve(value);
+							} else {
+								reject(new Error('Couch database insert update failed.'));
+							}
 						});
 				}
 			});
-		});
+		}));
 	}
 
 	_dbInsert(options) {
-		logger.debug('setValue, _dbInsert', { options: options });
-		var self = this;
-		return new Promise(function (resolve, reject) {
-			self._database.insert(options, function (err) {
+		logger.debug('setValue, _dbInsert', {options: options});
+		const self = this;
+		return new Promise(((resolve, reject) => {
+			self._database.insert(options, (err) => {
 				if (err) {
 					logger.error('setValue, _dbInsert, ERROR: [%s.insert] - ', self._name, err.error);
 					reject(new Error(err.error));
@@ -173,7 +170,7 @@ var CouchDBKeyValueStore = class extends api.KeyValueStore {
 					resolve(true);
 				}
 			});
-		});
+		}));
 	}
 };
 

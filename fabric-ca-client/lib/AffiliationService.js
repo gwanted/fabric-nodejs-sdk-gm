@@ -1,17 +1,8 @@
 /*
  Copyright 2018 IBM All Rights Reserved.
 
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
+ SPDX-License-Identifier: Apache-2.0
 
-	  http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
 */
 
 'use strict';
@@ -65,14 +56,11 @@ class AffiliationService {
 		}
 
 		if (!req.name) {
-			throw new Error('Missing required parameters.  "req.name" is required.');
+			throw new Error('Missing required parameters. "req.name" is required.');
 		}
 		checkRegistrar(registrar);
 
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const signingIdentity = registrar.getSigningIdentity();
 
 		let url = 'affiliations';
 		if (req.force === true) {
@@ -100,10 +88,7 @@ class AffiliationService {
 		}
 		checkRegistrar(registrar);
 
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const signingIdentity = registrar.getSigningIdentity();
 
 		const url = 'affiliations/' + affiliation;
 		return this.client.get(url, signingIdentity);
@@ -119,10 +104,7 @@ class AffiliationService {
 	getAll(registrar) {
 		checkRegistrar(registrar);
 
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const signingIdentity = registrar.getSigningIdentity();
 
 		return this.client.get('affiliations', signingIdentity);
 	}
@@ -143,12 +125,10 @@ class AffiliationService {
 		if (!req.name || typeof req.name !== 'string') {
 			throw new Error('Missing required argument "req.name", or argument "req.name" is not a valid string');
 		}
+
 		checkRegistrar(registrar);
 
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const signingIdentity = registrar.getSigningIdentity();
 
 		let url = 'affiliations/' + req.name;
 		if (req.force === true) {
@@ -179,10 +159,7 @@ class AffiliationService {
 		}
 		checkRegistrar(registrar);
 
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const signingIdentity = registrar.getSigningIdentity();
 
 		let url = 'affiliations/' + affiliation;
 		if (req.force === true) {

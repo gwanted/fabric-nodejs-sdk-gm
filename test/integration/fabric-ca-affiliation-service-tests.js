@@ -1,15 +1,18 @@
-let utils = require('fabric-client/lib/utils.js');
-let logger = utils.getLogger('integration.client');
+/**
+ * Copyright 2017 IBM All Rights Reserved.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
-let tape = require('tape');
-let _test = require('tape-promise');
-let test = _test(tape);
+const tape = require('tape');
+const _test = require('tape-promise').default;
+const test = _test(tape);
 const path = require('path');
-let FabricCAServices = require('../../fabric-ca-client');
+const FabricCAServices = require('../../fabric-ca-client');
 const User = require('../../fabric-ca-client/lib/User');
 
-let userOrg = 'org1';
-let tlsOptions = {
+const userOrg = 'org1';
+const tlsOptions = {
 	trustedRoots: [],
 	verify: false
 };
@@ -23,8 +26,8 @@ function checkResponse(response, name, t) {
 }
 
 function checkExist(response, affiliation, t) {
-	let res = response.affiliations.find((path) => {
-		if (path.name === affiliation) {
+	const res = response.affiliations.find((filePath) => {
+		if (filePath.name === affiliation) {
 			return true;
 		}
 	});
@@ -38,8 +41,8 @@ function checkExist(response, affiliation, t) {
 }
 
 function checkNotExist(response, affiliation, t) {
-	let res = response.affiliations.find((path) => {
-		if (path.name === affiliation) {
+	const res = response.affiliations.find((filePath) => {
+		if (filePath.name === affiliation) {
 			return true;
 		}
 	});
@@ -57,10 +60,10 @@ test('\n\n ** HFCAIdentityService Test **\n\n', (t) => {
 	FabricCAServices.addConfigFile(path.join(__dirname, 'e2e', 'config.json'));
 	ORGS = FabricCAServices.getConfigSetting('test-network');
 
-	let fabricCAEndpoint = ORGS[userOrg].ca.url;
+	const fabricCAEndpoint = ORGS[userOrg].ca.url;
 
-	FabricCAServices.getConfigSetting('crypto-keysize', '256'); //force for gulp test
-	FabricCAServices.setConfigSetting('crypto-hash-algo', 'SHA2'); //force for gulp test
+	FabricCAServices.getConfigSetting('crypto-keysize', '256'); // force for gulp test
+	FabricCAServices.setConfigSetting('crypto-hash-algo', 'SHA2'); // force for gulp test
 
 	const caService = new FabricCAServices(fabricCAEndpoint, tlsOptions, ORGS[userOrg].ca.name);
 
@@ -140,7 +143,7 @@ test('\n\n ** HFCAIdentityService Test **\n\n', (t) => {
 			return affiliationService.getAll(admin);
 		}).then((resp) => {
 			t.equal(resp.success, true, 'resp should have property \'success\' equals true');
-			let org2 = resp.result.affiliations.find((affiliation) => affiliation.name === 'org2');
+			const org2 = resp.result.affiliations.find((affiliation) => affiliation.name === 'org2');
 			checkExist(org2, updatedAffiliation.name, t);
 			checkNotExist(org2, newAffiliationRequest.name, t);
 			t.pass(`After update, ${newAffiliationRequest.name} does not exist, and ${updatedAffiliation.name} exists`);

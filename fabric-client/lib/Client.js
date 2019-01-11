@@ -1,60 +1,46 @@
 /*
- Copyright 2016, 2017 IBM All Rights Reserved.
+ Copyright 2016, 2018 IBM All Rights Reserved.
 
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
+ SPDX-License-Identifier: Apache-2.0
 
-	  http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
 */
 
 'use strict';
 
-var sdkUtils = require('./utils.js');
-var clientUtils = require('./client-utils.js');
+const sdkUtils = require('./utils.js');
+const clientUtils = require('./client-utils.js');
 
-var api = require('./api.js');
-var BaseClient = require('./BaseClient.js');
-var User = require('./User.js');
-var Channel = require('./Channel.js');
-var Packager = require('./Packager.js');
-var Peer = require('./Peer.js');
-var EventHub = require('./EventHub.js');
+const api = require('./api.js');
+const BaseClient = require('./BaseClient.js');
+const User = require('./User.js');
+const Channel = require('./Channel.js');
+const Package = require('./Package.js');
+const Peer = require('./Peer.js');
 const ChannelEventHub = require('./ChannelEventHub');
-var Orderer = require('./Orderer.js');
-var TransactionID = require('./TransactionID.js');
-var MSP = require('./msp/msp.js');
-var idModule = require('./msp/identity.js');
-var Identity = idModule.Identity;
-var SigningIdentity = idModule.SigningIdentity;
-var Signer = idModule.Signer;
+const Orderer = require('./Orderer.js');
+const TransactionID = require('./TransactionID.js');
+const {Signer, SigningIdentity} = require('./msp/identity.js');
+const crypto = require('crypto');
 
-var util = require('util');
-var fs = require('fs-extra');
-var path = require('path');
-var yaml = require('js-yaml');
-var Constants = require('./Constants.js');
+const util = require('util');
+const fs = require('fs-extra');
+const path = require('path');
+const yaml = require('js-yaml');
+const Constants = require('./Constants.js');
 
-var grpc = require('grpc');
-var _commonProto = grpc.load(__dirname + '/protos/common/common.proto').common;
-var _configtxProto = grpc.load(__dirname + '/protos/common/configtx.proto').common;
-var _ccProto = grpc.load(__dirname + '/protos/peer/chaincode.proto').protos;
-var _queryProto = grpc.load(__dirname + '/protos/peer/query.proto').protos;
+const ProtoLoader = require('./ProtoLoader');
+const _commonProto = ProtoLoader.load(__dirname + '/protos/common/common.proto').common;
+const _configtxProto = ProtoLoader.load(__dirname + '/protos/common/configtx.proto').common;
+const _queryProto = ProtoLoader.load(__dirname + '/protos/peer/query.proto').protos;
 
-var config = sdkUtils.getConfig();
+const config = sdkUtils.getConfig();
 // setup the location of the default config shipped with code
-var default_config = path.resolve( __dirname, '../config/default.json');
-config.reorderFileStores(default_config); //make sure this default has precedences
+const default_config = path.resolve(__dirname, '../config/default.json');
+config.reorderFileStores(default_config); // make sure this default has precedences
 // set default SSL ciphers for gRPC
 process.env.GRPC_SSL_CIPHER_SUITES = sdkUtils.getConfigSetting('grpc-ssl-cipher-suites');
 
-var logger = sdkUtils.getLogger('Client.js');
+const logger = sdkUtils.getLogger('Client.js');
 
 /**
  * A client instance provides the main API surface to interact with a network of
@@ -83,93 +69,175 @@ var logger = sdkUtils.getLogger('Client.js');
  * @extends BaseClient
  *
  */
-var Client = class extends BaseClient {
+const Client = class extends BaseClient {
 
 	constructor() {
 		super();
+		this._mspid = null; // The mspid id and the organization id
 
-		this._channels = {};
 		this._stateStore = null;
 		this._userContext = null;
+
+		// common connection profile
 		this._network_config = null;
+
 		// keep a collection of MSP's
 		this._msps = new Map();
 
 		// Is in dev mode or network mode
 		this._devMode = false;
 
-		// When using a network configuration there may be
+		// When using a common connection profile there may be
 		// an admin defined for the current user's organization.
 		// This will get set during the setUserFromConfig
 		this._adminSigningIdentity = null;
 
-		// When using a network configuration (connection profile) the client
+		// When using a common connection profile (connection profile) the client
 		// side mutual tls cert and key must be stored here
+		//  -- also store the hash after computing
 		this._tls_mutual = {};
+
+		this._organizations = new Map();
+		this._certificateAuthorities = new Map();
+		this._channels = new Map();
+
+		// connection settings
+		this._connection_options = {};
 	}
 
 	/**
-	 * Load a network configuration object or load a JSON file and return a Client object.
+	 * Load a common connection profile object or load a JSON file and return a Client object.
 	 *
-	 * @param {object | string} config - This may be the config object or a path to the configuration file
+	 * @param {object | string} loadConfig - This may be the config object or a path to the configuration file
 	 * @return {Client} An instance of this class initialized with the network end points.
 	 */
-	static loadFromConfig(config) {
-		var client = new Client();
-		client._network_config = _getNetworkConfig(config, client);
-		if(client._network_config.hasClient()) {
-			client._setAdminFromConfig();
-		}
-
+	static loadFromConfig(loadConfig) {
+		const client = new Client();
+		client.loadFromConfig(loadConfig);
 		return client;
 	}
 
 	/**
-	 * Load a network configuration object or load a JSON file and update this client with
+	 * Load a common connection profile object or load a JSON file and update this client with
 	 * any values in the config.
 	 *
 	 * @param {object | string} config - This may be the config object or a path to the configuration file
 	 */
-	loadFromConfig(config) {
-		var additional_network_config = _getNetworkConfig(config, this);
-		if(!this._network_config) {
+	loadFromConfig(loadConfig) {
+		const additional_network_config = _getNetworkConfig(loadConfig, this);
+		if (!this._network_config) {
 			this._network_config = additional_network_config;
 		} else {
 			this._network_config.mergeSettings(additional_network_config);
 		}
-		if(this._network_config.hasClient()) {
+		if (this._network_config.hasClient()) {
 			this._setAdminFromConfig();
+			this._setMspidFromConfig();
+			this._addConnectionOptionsFromConfig();
 		}
 	}
 
 	/**
 	 * Sets the mutual TLS client side certificate and key necessary to build
-	 * network endpoints when working with a network configuration (connection profile).
+	 * network endpoints when working with a common connection profile (connection profile).
 	 * This must be called before a peer, orderer, or channel eventhub is needed.
+	 *
+	 * If the tls client material has not been provided for the client, it will be
+	 * generated if the user has been assigned to this client. Note that it will
+	 * always use the default software cryptosuite, not the one assigned to the
+	 * client.
+
 	 *
 	 * @param {string} clientCert - The pem encoded client certificate.
 	 * @param {byte[]} clientKey - The client key.
 	 */
 	setTlsClientCertAndKey(clientCert, clientKey) {
 		logger.debug('setTlsClientCertAndKey - start');
-		this._tls_mutual.clientCert = clientCert;
-		this._tls_mutual.clientKey = clientKey;
+		if (clientCert && clientKey) {
+			this._tls_mutual.clientCert = clientCert;
+			this._tls_mutual.clientKey = clientKey;
+			this._tls_mutual.clientCertHash = null;
+			this._tls_mutual.selfGenerated = false;
+		} else {
+			if (this._userContext) {
+				logger.debug('setTlsClientCertAndKey - generating self-signed TLS client certificate');
+				// generate X509 cert pair
+				// use the default software cryptosuite, not the client assigned cryptosuite, which may be
+				// HSM, or the default has been set to HSM. FABN-830
+				const key = Client.newCryptoSuite({software: true}).generateEphemeralKey();
+				this._tls_mutual.clientKey = key.toBytes();
+				this._tls_mutual.clientCert = key.generateX509Certificate(this._userContext.getName());
+				this._tls_mutual.selfGenerated = true;
+			}
+		}
+
 	}
 
 	/**
-	 * Utility method to add the mutual tls client material to a set of options
+	 * Utility method to add the mutual tls client material to a set of options.
 	 * @param {object} opts - The options object holding the connection settings
 	 *        that will be updated with the mutual TLS clientCert and clientKey.
+	 * @throws Will throw an error if generating the tls client material fails
 	 */
-	 addTlsClientCertAndKey(opts) {
-		 if(this._tls_mutual.clientCert) {
-			 opts.clientCert = this._tls_mutual.clientCert;
-		 }
-		 if(this._tls_mutual.clientKey) {
-			 opts.clientKey = this._tls_mutual.clientKey;
-		 }
-	 }
+	addTlsClientCertAndKey(opts) {
+		// use client cert pair if it exists and is not a self cert generated by this class
+		if (!this._tls_mutual.selfGenerated && this._tls_mutual.clientCert && this._tls_mutual.clientKey) {
+			opts.clientCert = this._tls_mutual.clientCert;
+			opts.clientKey = this._tls_mutual.clientKey;
+		}
+	}
 
+	/*
+	 * Utility method to merge connection options into a set of options and
+	 * return a new options object.
+	 * The client's options will not override any existing settings by
+	 * the same name, these will only be added as new settings to the
+	 * application's options being passed in. see {@link Client#addConnectionOptions}
+	 * for how this client will have connection options to merge.
+	 *
+	 * @param {object} options - The object holding the application options
+	 *        that will be merged on top of this client's options.
+	 * @returns {object} - The object holding both the application's options
+	 *          and this client's options.
+	 */
+	_buildConnectionOptions(options) {
+		const method = 'getConnectionOptions';
+		logger.debug('%s - start', method);
+		let return_options = Object.assign({}, Client.getConfigSetting('connection-options'));
+		return_options = Object.assign({}, this._connection_options);
+		return_options = Object.assign(return_options, options);
+
+		if (!return_options.clientCert) {
+			this.addTlsClientCertAndKey(return_options);
+		}
+
+		return return_options;
+	}
+
+	/**
+	 * Add a set of connection options to this client. These will be
+	 * available to be merged into an application's options when new
+	 * peers and orderers are created or when a channel
+	 * uses discovery to automatically create the peers and orderers on
+	 * the channel. This would be a convenient place to store common GRPC settings
+	 * that affect all connections from this client.
+	 * These settings will be used when this client object builds new
+	 * {@link Peer} or {@link Orderer} instances when the {@link Client#newPeer},
+	 * {@link Client#getPeer}, {@link Client#newOrderer} or {@link Client#getOrderer}
+	 * methods are called.
+	 * Options will be automatically added when loading a common connection profile
+	 * and the client section has the 'connection' section with an 'options' attribute.
+	 * These options will be initially loaded from the system configuration
+	 * 'connection-options' setting.
+	 *
+	 * @param {object} options - The connection options that will be added to
+	 *        this client instance.
+	 */
+	addConnectionOptions(options) {
+		if (options) {
+			this._connection_options = Object.assign(this._connection_options, options);
+		}
+	}
 
 	/**
 	 * Determine if the fabric backend is started in
@@ -202,57 +270,58 @@ var Client = class extends BaseClient {
 	 * @returns {Channel} The uninitialized channel instance.
 	 */
 	newChannel(name) {
-		var channel = this._channels[name];
-
-		if (channel)
-			throw new Error(util.format('Channel %s already exists', name));
-
-		channel = new Channel(name, this);
-		this._channels[name] = channel;
+		if (this._channels.get(name)) {
+			throw new Error(`Channel ${name} already exists`);
+		}
+		const channel = new Channel(name, this);
+		this._channels.set(name, channel);
 		return channel;
 	}
 
 	/**
 	 * Get a {@link Channel} instance from the client instance. This is a memory-only lookup.
-	 * If the loaded network configuration has a channel by the 'name', a new channel instance
+	 * If the loaded common connection profile has a channel by the 'name', a new channel instance
 	 * will be created and populated with {@link Orderer} objects and {@link Peer} objects
-	 * as defined in the network configuration.
+	 * as defined in the common connection profile.
 	 *
 	 * @param {string} name - Optional. The name of the channel. When omitted the
-	 *        first channel defined in the loaded network configuration will be
+	 *        first channel defined in the loaded common connection profile will be
 	 *        returned
 	 * @param {boolean} throwError - Indicates if this method will throw an error
 	 *        if the channel is not found. Default is true.
 	 * @returns {Channel} The channel instance
 	 */
-	getChannel(name, throwError) {
-		var channel = this._channels[name];
+	getChannel(name, throwError = true) {
+		let channel;
+		if (name) {
+			channel = this._channels.get(name);
+		} else if (this._channels.size > 0) {
+			// not sure it's deterministic which channel would be returned if more than 1.
+			channel = this._channels.values().next().value;
+		}
 
-		if (channel)
+		if (channel) {
 			return channel;
-		else {
-			// maybe it is defined in the network config
-			if(this._network_config) {
-				if(!name) {
-					let channel_names = Object.keys(this._network_config._network_config.channels);
-					if(channel_names) {
-						name = channel_names[0];
-					}
+		} else {
+			// maybe it is defined in the network
+			if (this._network_config) {
+				if (!name) {
+					const channel_names = Object.keys(this._network_config._network_config.channels);
+					name = channel_names[0];
 				}
-				channel = this._network_config.getChannel(name);
-				this._channels[name] = channel;
+				if (name) {
+					channel = this._network_config.getChannel(name);
+				}
 			}
-			if(channel) {
+			if (channel) {
+				this._channels.set(name, channel);
 				return channel;
 			}
 
-			logger.error('Channel not found for name '+name+'.');
+			logger.error(`Channel not found for name ${name}`);
 
-			if(typeof throwError === 'undefined') {
-				throwError = true;
-			}
-			if(throwError) {
-				throw new Error('Channel not found for name '+name+'.');
+			if (throwError) {
+				throw new Error(`Channel not found for name ${name}.`);
 			} else {
 				return null;
 			}
@@ -261,6 +330,8 @@ var Client = class extends BaseClient {
 
 	/**
 	 * @typedef {Object} ConnectionOpts
+	 * @property {string} name - Optional. To gives this remote endpoint a name.
+	 *           The endpoint will be known by its URL if no name is provided.
 	 * @property {string} request-timeout - An integer value in milliseconds to
 	 *    be used as maximum amount of time to wait on the request to respond.
 	 * @property {string} pem - The certificate file, in PEM format,
@@ -283,99 +354,59 @@ var Client = class extends BaseClient {
 	 * send channel-aware requests such as instantiating chaincodes, and invoking
 	 * transactions.
 	 *
+	 * This method will return a new {@link Peer} object.
+	 *
 	 * @param {string} url - The URL with format of "grpc(s)://host:port".
 	 * @param {ConnectionOpts} opts - The options for the connection to the peer.
 	 * @returns {Peer} The Peer instance.
 	 */
 	newPeer(url, opts) {
-		var peer = new Peer(url, opts);
+		return new Peer(url, this._buildConnectionOptions(opts));
+	}
+
+	/**
+	 * This method will create a {@link Peer} instance. This method is only able to
+	 * create an instance of a peer if there is a loaded connection profile that
+	 * contains a peer with the name.
+	 *
+	 * @param {string} name - The name of the peer
+	 * @returns {Peer} The Peer instance.
+	 */
+	getPeer(name) {
+		let peer = null;
+		if (this._network_config) {
+			peer = this._network_config.getPeer(name);
+		}
+		if (!peer) {
+			throw new Error('Peer with name:' + name + ' not found');
+		}
+
 		return peer;
 	}
 
 	/**
-	 * Returns an {@link EventHub} object. An event hub object encapsulates the
-	 * properties of an event stream on a peer node, through which the peer publishes
-	 * notifications of blocks being committed in the channel's ledger.
+	 * Returns a list of {@link Peer} for the mspid of an organization as defined
+	 * in the currently loaded common connection profile. If no id is
+	 * provided then the organization named in the currently active network
+	 * configuration's client section will be used.
 	 *
-	 * @returns {EventHub} The EventHub instance
+	 * @param {string} mspid - Optional - The mspid of an organization
+	 * @returns {Peer[]} An array of Peer instances that are defined for this organization
 	 */
-	newEventHub() {
-		var event_hub = new EventHub(this);
-		return event_hub;
-	}
-
-	/**
-	 * Returns and {@link EventHub} object based on the event hub address
-	 * as defined in the currently loaded network configuration for the
-	 * peer by the name parameter. The named peer must have the "eventUrl"
-	 * setting or a null will be returned.
-	 *
-	 * @param {string} peer_name - The name of the peer that has an event hub defined
-	 * @returns {EventHub} The EventHub instance that has had the event hub address assigned
-	 */
-	getEventHub(peer_name) {
-		var event_hub = null;
-		if(this._network_config) {
-			event_hub = this._network_config.getEventHub(peer_name);
+	getPeersForOrg(mspid) {
+		let _mspid = mspid;
+		if (!mspid) {
+			_mspid = this._mspid;
+		}
+		if (_mspid && this._network_config) {
+			const organization = this._network_config.getOrganizationByMspId(_mspid);
+			if (organization) {
+				return organization.getPeers();
+			}
 		}
 
-		return event_hub;
+		return [];
 	}
-
-	/**
-	 * Returns a list of {@link EventHub} for the named organization as defined
-	 * in the currently loaded network configuration. If no organization is
-	 * provided then the organization named in the currently active network
-	 * configuration's client section will be used. The list will be based on
-	 * the peers in the organization that have the "eventUrl" setting.
-	 *
-	 * @param {string} org_name - Optional - The name of an organization
-	 * @returns {EventHub[]} An array of EventHub instances that are defined for this organization
-	 */
-	 getEventHubsForOrg(org_name) {
-		 var event_hubs = [];
-		 if(this._network_config) {
-			 if(!org_name && this._network_config.hasClient()) {
-				 let client = this._network_config.getClientConfig();
-				 org_name = client.organization;
-			 }
-			 if(org_name) {
-				 let organization = this._network_config.getOrganization(org_name);
-				 if(organization) {
-					 event_hubs = organization.getEventHubs();
-				 }
-			 }
-		 }
-
-		 return event_hubs;
-	 }
-
-	 /**
- 	 * Returns a list of {@link Peer} for the named organization as defined
- 	 * in the currently loaded network configuration. If no organization is
- 	 * provided then the organization named in the currently active network
- 	 * configuration's client section will be used.
- 	 *
- 	 * @param {string} org_name - Optional - The name of an organization
- 	 * @returns {Peer[]} An array of Peer instances that are defined for this organization
- 	 */
- 	 getPeersForOrg(org_name) {
- 		 var peers = [];
- 		 if(this._network_config) {
- 			 if(!org_name && this._network_config.hasClient()) {
- 				 let client = this._network_config.getClientConfig();
- 				 org_name = client.organization;
- 			 }
- 			 if(org_name) {
- 				 let organization = this._network_config.getOrganization(org_name);
- 				 if(organization) {
- 					 peers = organization.getPeers();
- 				 }
- 			 }
- 		 }
-
- 		 return peers;
- 	 }
 
 	/**
 	 * Returns an {@link Orderer} object with the given url and opts. An orderer object
@@ -384,120 +415,173 @@ var Client = class extends BaseClient {
 	 * requests for creating and updating channels. They are used by the {@link Channel}
 	 * objects to broadcast requests for ordering transactions.
 	 *
+	 * This method will create the orderer.
+	 *
 	 * @param {string} url The URL with format of "grpc(s)://host:port".
 	 * @param {ConnectionOpts} opts The options for the connection to the orderer.
 	 * @returns {Orderer} The Orderer instance.
 	 */
 	newOrderer(url, opts) {
-		var orderer = new Orderer(url, opts);
+		return new Orderer(url, this._buildConnectionOptions(opts));
+	}
+
+	/**
+	 * This method will create the {@link Orderer} if it does not exist and hold a
+	 * reference to the instance object by name. This method is only able to
+	 * create an instance of an orderer if there is a loaded connection profile that
+	 * contains an orderer with the name. Orderers that have been created by the
+	 * {@link newOrderer} method may be reference by the url if no name was provided
+	 * in the options.
+	 *
+	 * @param {string} name - The name or url of the orderer
+	 * @returns {Orderer} The Orderer instance.
+	 */
+	getOrderer(name) {
+		let orderer = null;
+		if (this._network_config) {
+			orderer = this._network_config.getOrderer(name);
+		}
+		if (!orderer) {
+			throw new Error('Orderer with name:' + name + ' not found');
+		}
+
 		return orderer;
+	}
+
+	/*
+	 * Private utility method to get target peers. The peers will be in the organization of this client,
+	 * (meaning the peer has the same mspid). If this client is not assigned a mspid, then all
+	 * peers will be returned defined on the channel. The returned list may be empty if no channels
+	 * are provide, a channel is not found on the list or channel does not have any peers defined.
+	 *
+	 * @param {string||string[]} channel_names channel name or array of channel names
+	 * @returns {ChannelPeer[]} array of channel peers
+	 * @private
+	 */
+	getPeersForOrgOnChannel(channel_names) {
+		if (!Array.isArray(channel_names)) {
+			channel_names = [channel_names];
+		}
+		const peers = [];
+		const temp_peers = {};
+		for (const i in channel_names) {
+			const channel = this.getChannel(channel_names[i]);
+			const channel_peers = channel.getPeersForOrg(this._mspid);
+			for (const j in channel_peers) {
+				const peer = channel_peers[j];
+				temp_peers[peer.getName()] = peer; // will remove duplicates
+			}
+		}
+		for (const name in temp_peers) {
+			// TODO: Need to check the roles but cannot do so at present awaiting fix
+			peers.push(temp_peers[name]);
+		}
+		return peers;
 	}
 
 	/**
 	 * Returns a CertificateAuthority implementation as defined by the settings
-	 * in the currently loaded network configuration and the client configuration.
-	 * A network configuration must be loaded for this get method to return a
+	 * in the currently loaded common connection profile and the client configuration.
+	 * A common connection profile must be loaded for this get method to return a
 	 * Certificate Authority.
 	 * A crypto suite must be assigned to this client instance. Running the
 	 * 'initCredentialStores' method will build the stores and create a crypto
-	 * suite as defined in the network configuration.
+	 * suite as defined in the common connection profile.
 	 *
 	 * @param {string} name - Optional - the name of the Certificate Authority
 	 *        defined in the loaded connection profile.
 	 * @returns {CertificateAuthority}
 	 */
-	 getCertificateAuthority(name) {
-		 if(!this._network_config) {
-			 throw new Error('No network configuration has been loaded');
-		 }
-		 if(!this._cryptoSuite) {
-			 throw new Error('A crypto suite has not been assigned to this client');
-		 }
-		 let ca_info = null;
-		 let ca_service = null;
+	getCertificateAuthority(name) {
+		if (!this._network_config) {
+			throw new Error('No common connection profile has been loaded');
+		}
+		if (!this._cryptoSuite) {
+			throw new Error('A crypto suite has not been assigned to this client');
+		}
+		let ca_info = null;
 
-		 if(name) {
-			 ca_info = this._network_config.getCertificateAuthority(name);
-		 } else {
-			 let client_config = this._network_config.getClientConfig();
-			 if(client_config && client_config.organization) {
-			 	let organization_config = this._network_config.getOrganization(client_config.organization);
-			 	if(organization_config) {
-				 	let ca_infos = organization_config.getCertificateAuthorities();
-				 	if(ca_infos.length > 0) {
-					 	ca_info = ca_infos[0];
-				 	}
-			 	}
+		if (name) {
+			ca_info = this._network_config.getCertificateAuthority(name);
+		} else {
+			const client_config = this._network_config.getClientConfig();
+			if (client_config && client_config.organization) {
+				const organization_config = this._network_config.getOrganization(client_config.organization, true);
+				if (organization_config) {
+					const ca_infos = organization_config.getCertificateAuthorities();
+					if (ca_infos.length > 0) {
+						ca_info = ca_infos[0];
+					}
+				}
 			}
-		 }
+		}
 
-		 if(ca_info) {
-			 ca_service = this._buildCAfromConfig(ca_info);
-		 } else {
-			 throw new Error('Network configuration is missing this client\'s organization and certificate authority');
-		 }
+		if (ca_info) {
+			const ca_service = this._buildCAfromConfig(ca_info);
+			ca_info.setFabricCAServices(ca_service);
+		} else {
+			throw new Error('Common connection profile is missing this client\'s organization and certificate authority');
+		}
 
-		 return ca_service;
-	 }
+		return ca_info;
+	}
 
-	 /*
+	/*
 	  * utility method to build a ca from a connection profile ca settings
 	  */
-	 _buildCAfromConfig(ca_info) {
-		 let tlsCACerts = ca_info.getTlsCACerts();
-		 if(tlsCACerts) {
-			 tlsCACerts = [tlsCACerts];
-		 } else {
-			 tlsCACerts = [];
-		 }
-		 let connection_options = ca_info.getConnectionOptions();
-		 let verify = true; //default if not found
-		 if(connection_options && typeof connection_options.verify === 'boolean') {
-			 verify = connection_options.verify;
-		 }
-		 let tls_options = {
-			 trustedRoots: tlsCACerts,
-			 verify: verify
-		 };
-		 let ca_url = ca_info.getUrl();
-		 let ca_name = ca_info.getCaName();
+	_buildCAfromConfig(ca_info) {
+		let tlsCACerts = ca_info.getTlsCACerts();
+		if (tlsCACerts) {
+			tlsCACerts = [tlsCACerts];
+		} else {
+			tlsCACerts = [];
+		}
+		const connection_options = ca_info.getConnectionOptions();
+		let verify = true; // default if not found
+		if (connection_options && typeof connection_options.verify === 'boolean') {
+			verify = connection_options.verify;
+		}
+		const tls_options = {
+			trustedRoots: tlsCACerts,
+			verify
+		};
+		const ca_url = ca_info.getUrl();
+		const ca_name = ca_info.getCaName();
 
-		 let ca_service_class = Client.getConfigSetting('certificate-authority-client');
-		 let ca_service_impl = require(ca_service_class);
-		 let ca_service = new ca_service_impl( {url : ca_url, tlsOptions : tls_options, caName : ca_name, cryptoSuite : this._cryptoSuite});
-		 return ca_service;
-	 }
+		const ca_service_class = Client.getConfigSetting('certificate-authority-client');
+		const ca_service_impl = require(ca_service_class);
+		const ca_service = new ca_service_impl({
+			url: ca_url,
+			tlsOptions: tls_options,
+			caName: ca_name,
+			cryptoSuite: this._cryptoSuite
+		});
+		return ca_service;
+	}
 
 	/**
-	 * Returns the "client" section of the network configuration.
+	 * Returns the "client" section of the common connection profile.
 	 *
 	 * @returns {object} The client section from the configuration
 	 */
-	 getClientConfig() {
-		 let result = null;
-		 if(this._network_config && this._network_config.hasClient()) {
-			 result = this._network_config.getClientConfig();
-		 }
-
-		 return result;
-	 }
+	getClientConfig() {
+		if (this._network_config && this._network_config.hasClient()) {
+			return this._network_config.getClientConfig();
+		}
+		return null;
+	}
 
 	/**
-	 * Returns the mspid of the currently loaded client's organization
-	 * as defined in the network configuration.
+	 * Returns the mspid of the client. The mspid is also used as the
+	 * reference to the organization.
 	 *
 	 * @returns {string} the mspid of the organization defined in the client
-	 *          section of the loaded network configuration
+	 *          section of the loaded common connection profile
 	 */
-	 getMspid() {
-		 let result = null;
-		 let client_config = this.getClientConfig();
-		 if(client_config) {
-			 result = client_config.mspid;
-		 }
+	getMspid() {
+		return this._mspid;
+	}
 
-		 return result;
-	 }
 
 	/**
 	 * Returns a new {@link TransactionID} object. Fabric transaction ids are constructed
@@ -506,15 +590,15 @@ var Client = class extends BaseClient {
 	 * as a coherent pair.
 	 * <br><br>
 	 * This method requires the client instance to have been assigned a userContext.
-	 * @param {boolean} If this transactionID should be built based on the admin credentials
-	 *                  Default is a non admin TransactionID
+	 * @param {boolean} admin - If true, this transactionID should be built based on the admin credentials
+	 *                  Default is a non admin TransactionID based on the userContext.
 	 * @returns {TransactionID} An object that contains a transaction id based on the
 	 *           client's userContext and a randomly generated nonce value.
 	 */
 	newTransactionID(admin) {
-		if(admin) {
-			if(typeof admin === 'boolean') {
-				if(admin) {
+		if (typeof admin !== 'undefined' && admin !== null) {
+			if (typeof admin === 'boolean') {
+				if (admin) {
 					logger.debug('newTransactionID - getting an admin TransactionID');
 				} else {
 					logger.debug('newTransactionID - getting non admin TransactionID');
@@ -541,22 +625,10 @@ var Client = class extends BaseClient {
 	 */
 	extractChannelConfig(config_envelope) {
 		logger.debug('extractConfigUpdate - start');
-		try {
-			var envelope = _commonProto.Envelope.decode(config_envelope);
-			var payload = _commonProto.Payload.decode(envelope.getPayload().toBuffer());
-			var configtx = _configtxProto.ConfigUpdateEnvelope.decode(payload.getData().toBuffer());
-			return configtx.getConfigUpdate().toBuffer();
-		}
-		catch(err) {
-			if(err instanceof Error) {
-				logger.error('Problem with extracting the config update object :: %s', err.stack ? err.stack : err);
-				throw err;
-			}
-			else {
-				logger.error('Problem with extracting the config update object :: %s',err);
-				throw new Error(err);
-			}
-		}
+		const envelope = _commonProto.Envelope.decode(config_envelope);
+		const payload = _commonProto.Payload.decode(envelope.getPayload().toBuffer());
+		const configtx = _configtxProto.ConfigUpdateEnvelope.decode(payload.getData().toBuffer());
+		return configtx.getConfigUpdate().toBuffer();
 	}
 
 	/**
@@ -578,34 +650,34 @@ var Client = class extends BaseClient {
 	 * configuration bytes passed in, and returns the signature that is ready to be
 	 * included in the configuration update protobuf message to send to the orderer.
 	 *
-	 * @param {byte[]} config - The Configuration Update in byte form
+	 * @param {byte[]} loadConfig - The Configuration Update in byte form
 	 * @return {ConfigSignature} - The signature of the current user on the config bytes
 	 */
-	signChannelConfig(config) {
+	signChannelConfig(loadConfig) {
 		logger.debug('signChannelConfigUpdate - start');
-		if (typeof config === 'undefined' || config === null) {
+		if (!loadConfig) {
 			throw new Error('Channel configuration update parameter is required.');
 		}
-		if(!(config instanceof Buffer)) {
+		if (!Buffer.isBuffer(loadConfig)) {
 			throw new Error('Channel configuration update parameter is not in the correct form.');
 		}
 		// should try to use the admin signer if assigned
 		// then use the assigned user
-		var signer = this._getSigningIdentity(true);
+		const signer = this._getSigningIdentity(true);
 
 		// signature is across a signature header and the config update
-		let proto_signature_header = new _commonProto.SignatureHeader();
+		const proto_signature_header = new _commonProto.SignatureHeader();
 		proto_signature_header.setCreator(signer.serialize());
 		proto_signature_header.setNonce(sdkUtils.getNonce());
-		var signature_header_bytes = proto_signature_header.toBuffer();
+		const signature_header_bytes = proto_signature_header.toBuffer();
 
 		// get all the bytes to be signed together, then sign
-		let signing_bytes = Buffer.concat([signature_header_bytes, config]);
-		let sig = signer.sign(signing_bytes);
-		let signature_bytes = Buffer.from(sig);
+		const signing_bytes = Buffer.concat([signature_header_bytes, loadConfig]);
+		const sig = signer.sign(signing_bytes);
+		const signature_bytes = Buffer.from(sig);
 
 		// build the return object
-		let proto_config_signature = new _configtxProto.ConfigSignature();
+		const proto_config_signature = new _configtxProto.ConfigSignature();
 		proto_config_signature.setSignatureHeader(signature_header_bytes);
 		proto_config_signature.setSignature(signature_bytes);
 
@@ -615,7 +687,7 @@ var Client = class extends BaseClient {
 	/**
 	 * @typedef {Object} ChannelRequest
 	 * @property {string} name - Required. The name of the new channel
-	 * @property {Orderer} orderer - Required. An Orderer object representing the
+	 * @property {Orderer | string} orderer - Required. An Orderer object or an orderer name representing the
 	 *                               orderer node to send the channel create request
 	 * @property {byte[]} envelope - Optional. Bytes of the envelope object containing all
 	 *                               required settings and signatures to initialize this channel. This envelope
@@ -625,8 +697,8 @@ var Client = class extends BaseClient {
 	 * @property {byte[]} config - Optional. Protobuf ConfigUpdate object extracted from a ConfigEnvelope
 	 *                             created by the configtxgen tool. See [extractChannelConfig()]{@link Client#extractChannelConfig}.
 	 *                             The ConfigUpdate object may also be created by the configtxlator tool.
-	 * @property {ConfigSignature[]} signatures - Required. The list of signatures required by the
-	 *                               channel creation or update policy when using the `config` parameter.
+	 * @property {ConfigSignature[] | string[]} signatures - Required. The list of signatures required by the
+	 *                                                       channel creation or update policy when using the `config` parameter.
 	 * @property {TransactionID} txId - Required. TransactionID object with the transaction id and nonce
 	 */
 
@@ -649,12 +721,7 @@ var Client = class extends BaseClient {
 	 *                    the channel has been created completely or not.
 	 */
 	createChannel(request) {
-		var have_envelope = false;
-		if(request && request.envelope) {
-			logger.debug('createChannel - have envelope');
-			have_envelope = true;
-		}
-		return this._createOrUpdateChannel(request, have_envelope);
+		return this._createOrUpdateChannel(request, request && request.envelope);
 	}
 
 	/**
@@ -668,127 +735,156 @@ var Client = class extends BaseClient {
 	 * @returns {Promise} Promise for a result object with status on the acceptance of the update request
 	 *                    by the orderer. A channel update is finally completed when the new channel configuration
 	 *                    block created by the orderer has been committed to the channel's peers. To be notified
-	 *                    of the successful update of the channel, an application should use the {@link EventHub}
+	 *                    of the successful update of the channel, an application should use the {@link ChannelEventHub}
 	 *                    to connect to the peers and register a block listener.
 	 */
 	updateChannel(request) {
-		var have_envelope = false;
-		if(request && request.envelope) {
-			logger.debug('updateChannel - have envelope');
-			have_envelope = true;
-		}
-		return this._createOrUpdateChannel(request, have_envelope);
+		return this._createOrUpdateChannel(request, request && request.envelope);
 	}
 
 	/*
 	 * internal method to support create or update of a channel
 	 */
-	_createOrUpdateChannel(request, have_envelope) {
+	async _createOrUpdateChannel(request, have_envelope) {
 		logger.debug('_createOrUpdateChannel - start');
-		var error_msg = null;
-		var orderer = null;
+		if (!request) {
+			throw new Error('Missing all required input request parameters for initialize channel');
+		}
+		if (!request.name) {
+			// verify that we have the name of the new channel
+			throw new Error('Missing name request parameter');
+		}
+		if (!request.txId) {
+			throw Error('Missing txId request parameter');
+		}
+		const orderer = this.getTargetOrderer(request.orderer, null, request.name);
 
-		if(!request) {
-			error_msg = 'Missing all required input request parameters for initialize channel';
-		}
-		// Verify that a config envelope or config has been included in the request object
-		else if (!request.config && !have_envelope) {
-			error_msg = 'Missing config request parameter containing the configuration of the channel';
-		}
-		else if(!request.signatures && !have_envelope) {
-			error_msg = 'Missing signatures request parameter for the new channel';
-		}
-		else if(!Array.isArray(request.signatures ) && !have_envelope) {
-			error_msg = 'Signatures request parameter must be an array of signatures';
-		}
-		else if(!request.txId && !have_envelope) {
-			error_msg = 'Missing txId request parameter';
-		}
-		// verify that we have the name of the new channel
-		else if(!request.name) {
-			error_msg = 'Missing name request parameter';
-		}
-
-		if(error_msg) {
-			logger.error('_createOrUpdateChannel error %s',error_msg);
-			return Promise.reject(new Error(error_msg));
-		}
-
-		try {
-			orderer = this.getTargetOrderer(request.orderer, null, request.name);
-		} catch (err) {
-			return Promise.reject(err);
-		}
-
-		var self = this;
-		var channel_id = request.name;
-		var channel = null;
-
-		// caller should have gotten a admin based TransactionID
-		// but maybe not, so go with whatever they have decided
-		var signer = this._getSigningIdentity(request.txId.isAdmin());
-
-		var signature = null;
-		var payload = null;
+		let signature = null;
+		let payload = null;
 		if (have_envelope) {
 			logger.debug('_createOrUpdateChannel - have envelope');
-			var envelope = _commonProto.Envelope.decode(request.envelope);
+			const envelope = _commonProto.Envelope.decode(request.envelope);
 			signature = envelope.signature;
 			payload = envelope.payload;
-		}
-		else {
+		} else {
+			// Verify that a config envelope or config has been included in the request object
+			if (!request.config) {
+				throw Error('Missing config request parameter containing the configuration of the channel');
+			}
+			if (!request.signatures) {
+				throw Error('Missing signatures request parameter for the new channel');
+			}
+			if (!Array.isArray(request.signatures)) {
+				throw Error('Signatures request parameter must be an array of signatures');
+			}
+
 			logger.debug('_createOrUpdateChannel - have config_update');
-			var proto_config_Update_envelope = new _configtxProto.ConfigUpdateEnvelope();
+			const proto_config_Update_envelope = new _configtxProto.ConfigUpdateEnvelope();
 			proto_config_Update_envelope.setConfigUpdate(request.config);
-			var signatures = _stringToSignature(request.signatures);
+			const signatures = _stringToSignature(request.signatures);
 			proto_config_Update_envelope.setSignatures(signatures);
 
-			var proto_channel_header = clientUtils.buildChannelHeader(
+			const proto_channel_header = clientUtils.buildChannelHeader(
 				_commonProto.HeaderType.CONFIG_UPDATE,
 				request.name,
 				request.txId.getTransactionID()
 			);
 
-			var proto_header = clientUtils.buildHeader(signer, proto_channel_header, request.txId.getNonce());
-			var proto_payload = new _commonProto.Payload();
+			const signer = this._getSigningIdentity(request.txId.isAdmin());
+
+			const proto_header = clientUtils.buildHeader(signer, proto_channel_header, request.txId.getNonce());
+			const proto_payload = new _commonProto.Payload();
 			proto_payload.setHeader(proto_header);
 			proto_payload.setData(proto_config_Update_envelope.toBuffer());
-			var payload_bytes = proto_payload.toBuffer();
+			const payload_bytes = proto_payload.toBuffer();
 
-			let sig = signer.sign(payload_bytes);
-			let signature_bytes = Buffer.from(sig);
-
-			signature = signature_bytes;
+			const sig = signer.sign(payload_bytes);
+			signature = Buffer.from(sig);
 			payload = payload_bytes;
 		}
 
 		// building manually or will get protobuf errors on send
-		var out_envelope = {
+		const out_envelope = {
 			signature: signature,
-			payload : payload
+			payload: payload
 		};
 
 		logger.debug('_createOrUpdateChannel - about to send envelope');
-		return orderer.sendBroadcast(out_envelope)
-			.then(
-				function(results) {
-					logger.debug('_createOrUpdateChannel - good results from broadcast :: %j',results);
+		const results = await orderer.sendBroadcast(out_envelope);
+		logger.debug('_createOrUpdateChannel - good results from broadcast :: %j', results);
+		return results;
+	}
 
-					return Promise.resolve(results);
-				}
-			)
-			.catch(
-				function(error) {
-					if(error instanceof Error) {
-						logger.debug('_createOrUpdateChannel - rejecting with %s', error);
-						return Promise.reject(error);
-					}
-					else {
-						logger.error('_createOrUpdateChannel - system error :: %s', error);
-						return Promise.reject(new Error(error));
-					}
-				}
-			);
+	/**
+	 * @typedef {Object} PeerQueryRequest
+	 * @property {Peer | string} target - The {@link Peer} object or peer name to
+	 *           use for the service discovery request
+	 * @property {boolean} useAdmin - Optional. Indicates that the admin credentials
+	 *           should be used in making this call to the peer. An administrative
+	 *           identity must have been loaded by a connection profile or by
+	 *           using the 'setAdminSigningIdentity' method.
+	 */
+
+	/**
+	 * @typedef {Object} PeerQueryResponse
+	 * @property {Object} peers_by_org
+	 * @example
+{
+	"peers_by_org": {
+		"Org1MSP": {
+			"peers":[
+				{"mspid":"Org1MSP", "endpoint":"peer0.org1.example.com:7051"}
+			]
+		},
+		"Org2MSP": {
+		"peers":[
+				{"mspid":"Org2MSP","endpoint":"peer0.org2.example.com:8051"}
+			]
+		}
+	}
+}
+	*/
+
+	/**
+	 * Queries the target peer for a list of {@link Peer} objects of all peers
+	 * known by the target peer.
+	 *
+	 * @param {PeerQueryRequest} request - The request parameters.
+	 * @returns {PeerQueryResponse} The list of peer information
+	 */
+	async queryPeers(request) {
+		const method = 'queryPeers';
+		logger.debug('%s - start', method);
+
+		let targets = null;
+		if (!request || !request.target) {
+			throw Error('Target Peer is required');
+		} else {
+			targets = this.getTargetPeers(request.target);
+			if (!targets || !targets[0]) {
+				throw Error('Target Peer not found');
+			}
+		}
+
+		try {
+			const discover_request = {
+				target: targets[0],
+				local: true,
+				config: false, // config only available on channel queries
+				useAdmin: request.useAdmin
+			};
+
+			// create dummy channel just to use the discovery code
+			// since channel does not exist only the local query will work
+			const channel = new Channel('discover-peers', this);
+
+			const discovery_results = await channel._discover(discover_request);
+
+			return discovery_results;
+		} catch (error) {
+			logger.error(error);
+			throw Error('Failed to discover local peers ::' + error.toString());
+		}
 	}
 
 	/**
@@ -808,67 +904,53 @@ var Client = class extends BaseClient {
 	 * @param {Peer} peer - The target peer to send the query
 	 * @param {boolean} useAdmin - Optional. Indicates that the admin credentials
 	 *        should be used in making this call to the peer. An administrative
-	 *        identity must have been loaded by network configuration or by
+	 *        identity must have been loaded by common connection profile or by
 	 *        using the 'setAdminSigningIdentity' method.
 	 * @returns {Promise} A promise to return a {@link ChannelQueryResponse}
 	 */
-	queryChannels(peer, useAdmin) {
+	async queryChannels(peer, useAdmin) {
 		logger.debug('queryChannels - start');
 		let targets = null;
-		if(!peer) {
-			return Promise.reject( new Error('Peer is required'));
+		if (!peer) {
+			throw Error('Peer is required');
 		} else {
-			try {
-				targets = this.getTargetPeers(peer);
-			} catch (err) {
-				return Promise.reject(err);
-			}
+			targets = this.getTargetPeers(peer);
 		}
-		const self = this;
 		const signer = this._getSigningIdentity(useAdmin);
 		const txId = new TransactionID(signer, useAdmin);
 		const request = {
 			targets: targets,
-			chaincodeId : Constants.CSCC,
+			chaincodeId: Constants.CSCC,
 			txId: txId,
 			signer: signer,
-			fcn : 'GetChannels',
+			fcn: 'GetChannels',
 			args: []
 		};
-		return Channel.sendTransactionProposal(request, '' /* special channel id */, self)
-			.then(
-				function(results) {
-					const responses = results[0];
-					logger.debug('queryChannels - got response');
-					if(responses && Array.isArray(responses)) {
-					//will only be one response as we are only querying one peer
-						if(responses.length > 1) {
-							return Promise.reject(new Error('Too many results returned'));
-						}
-						const response = responses[0];
-						if(response instanceof Error ) {
-							return Promise.reject(response);
-						}
-						if(response.response) {
-							logger.debug('queryChannels - response status :: %d', response.response.status);
-							const queryTrans = _queryProto.ChannelQueryResponse.decode(response.response.payload);
-							logger.debug('queryChannels - ProcessedTransaction.channelInfo.length :: %s', queryTrans.channels.length);
-							for (let channel of queryTrans.channels) {
-								logger.debug('>>> channel id %s ',channel.channel_id);
-							}
-							return Promise.resolve(queryTrans);
-						}
-						// no idea what we have, lets fail it and send it back
-						return Promise.reject(response);
-					}
-					return Promise.reject(new Error('Payload results are missing from the query'));
+		const results = await Channel.sendTransactionProposal(request, '' /* special channel id */, this);
+		const responses = results[0];
+		logger.debug('queryChannels - got response');
+		if (responses && Array.isArray(responses)) {
+			// will only be one response as we are only querying one peer
+			if (responses.length > 1) {
+				throw Error('Too many results returned');
+			}
+			const response = responses[0];
+			if (response instanceof Error) {
+				throw response;
+			}
+			if (response.response) {
+				logger.debug('queryChannels - response status :: %d', response.response.status);
+				const queryTrans = _queryProto.ChannelQueryResponse.decode(response.response.payload);
+				logger.debug('queryChannels - ProcessedTransaction.channelInfo.length :: %s', queryTrans.channels.length);
+				for (const channel of queryTrans.channels) {
+					logger.debug('>>> channel id %s ', channel.channel_id);
 				}
-			).catch(
-				function(err) {
-					logger.error('Failed Channels Query. Error: %s', err.stack ? err.stack : err);
-					return Promise.reject(err);
-				}
-			);
+				return queryTrans;
+			}
+			// no idea what we have, lets fail it and send it back
+			throw Error(response);
+		}
+		throw Error('Payload results are missing from the query');
 	}
 
 	/**
@@ -896,75 +978,61 @@ var Client = class extends BaseClient {
 	 * @param {Peer} peer - The target peer
 	 * @param {boolean} useAdmin - Optional. Indicates that the admin credentials
 	 *        should be used in making this call to the peer. An administrative
-	 *        identity must have been loaded by network configuration or by
+	 *        identity must have been loaded by common connection profile or by
 	 *        using the 'setAdminSigningIdentity' method.
 	 * @returns {Promise} Promise for a {@link ChaincodeQueryResponse} object
 	 */
-	queryInstalledChaincodes(peer, useAdmin) {
-		logger.debug('queryInstalledChaincodes - start peer %s',peer);
+	async queryInstalledChaincodes(peer, useAdmin) {
+		logger.debug('queryInstalledChaincodes - start peer %s', peer);
 		let targets = null;
-		if(!peer) {
-			return Promise.reject( new Error('Peer is required'));
+		if (!peer) {
+			throw new Error('Peer is required');
 		} else {
-			try {
-				targets = this.getTargetPeers(peer);
-			} catch (err) {
-				return Promise.reject(err);
-			}
+			targets = this.getTargetPeers(peer);
 		}
-		const self = this;
 		const signer = this._getSigningIdentity(useAdmin);
 		const txId = new TransactionID(signer, useAdmin);
 		const request = {
 			targets: targets,
-			chaincodeId : Constants.LSCC,
+			chaincodeId: Constants.LSCC,
 			txId: txId,
 			signer: signer,
-			fcn : 'getinstalledchaincodes',
+			fcn: 'getinstalledchaincodes',
 			args: []
 		};
-		return Channel.sendTransactionProposal(request, '' /* special channel id */, self)
-			.then(
-				function(results) {
-					const responses = results[0];
-					logger.debug('queryInstalledChaincodes - got response');
-					if(responses && Array.isArray(responses)) {
-					//will only be one response as we are only querying one peer
-						if(responses.length > 1) {
-							return Promise.reject(new Error('Too many results returned'));
-						}
-						const response = responses[0];
-						if(response instanceof Error ) {
-							return Promise.reject(response);
-						}
-						if(response.response) {
-							logger.debug('queryInstalledChaincodes - response status :: %d', response.response.status);
-							const queryTrans = _queryProto.ChaincodeQueryResponse.decode(response.response.payload);
-							logger.debug('queryInstalledChaincodes - ProcessedTransaction.chaincodeInfo.length :: %s', queryTrans.chaincodes.length);
-							for (let chaincode of queryTrans.chaincodes) {
-								logger.debug('>>> name %s, version %s, path %s',chaincode.name,chaincode.version,chaincode.path);
-							}
-							return Promise.resolve(queryTrans);
-						}
-						// no idea what we have, lets fail it and send it back
-						return Promise.reject(response);
-					}
-					return Promise.reject(new Error('Payload results are missing from the query'));
+		const results = await Channel.sendTransactionProposal(request, '' /* special channel id */, this);
+		const responses = results[0];
+		logger.debug('queryInstalledChaincodes - got response');
+		if (responses && Array.isArray(responses)) {
+			// will only be one response as we are only querying one peer
+			if (responses.length > 1) {
+				throw new Error('Too many results returned');
+			}
+			const response = responses[0];
+			if (response instanceof Error) {
+				throw response;
+			}
+			if (response.response) {
+				logger.debug('queryInstalledChaincodes - response status :: %d', response.response.status);
+				const queryTrans = _queryProto.ChaincodeQueryResponse.decode(response.response.payload);
+				logger.debug('queryInstalledChaincodes - ProcessedTransaction.chaincodeInfo.length :: %s', queryTrans.chaincodes.length);
+				for (const chaincode of queryTrans.chaincodes) {
+					logger.debug('>>> name %s, version %s, path %s', chaincode.name, chaincode.version, chaincode.path);
 				}
-			).catch(
-				function(err) {
-					logger.error('Failed Installed Chaincodes Query. Error: %s', err.stack ? err.stack : err);
-					return Promise.reject(err);
-				}
-			);
+				return queryTrans;
+			}
+			// no idea what we have, lets fail it and send it back
+			throw response;
+		}
+		throw new Error('Payload results are missing from the query');
 	}
 
 	/**
 	 * @typedef {Object} ChaincodeInstallRequest
-	 * @property {Peer[]} targets - Optional. An array of Peer objects where the
-	 *           chaincode will be installed. When excluded, the peers assigned
+	 * @property {Peer[] | string[]} targets - Optional. An array of Peer objects or peer names
+	 *           where the chaincode will be installed. When excluded, the peers assigned
 	 *           to this client's organization will be used as defined in the
-	 *           network configuration. If the 'channelNames' property is included,
+	 *           common connection profile. If the 'channelNames' property is included,
 	 *           the target peers will be based the peers defined in the channels.
 	 * @property {string} chaincodePath - Required. The path to the location of
 	 *           the source code of the chaincode. If the chaincode type is golang,
@@ -985,28 +1053,31 @@ var Client = class extends BaseClient {
 	 *           where the chaincode source code resides.
 	 * @property {string} chaincodeType - Optional. Type of chaincode. One of
 	 *           'golang', 'car', 'node' or 'java'.
-	 *           Default is 'golang'. Note that 'java' is not supported as of v1.0.
+	 *           Default is 'golang'.
 	 * @property {string[] | string} channelNames - Optional. When no targets are
-	 *           provided. The loaded network configuration will be searched for
+	 *           provided. The loaded common connection profile will be searched for
 	 *           suitable target peers. Peers that are defined in the channels named
 	 *           by this property and in this client's organization and that are
 	 *           in the endorsing or chain code query role on the named channel
 	 *           will be selected.
+	 * @property {TransactionID} txId - Optional. TransactionID object for this request.
 	 */
 
 	/**
-	 * All calls to the endorsing peers for proposal endorsement return this standard
-	 * array of objects.
+	 * All calls to the endorsing peers for proposal endorsement return this
+	 * standard array of objects.
 	 *
 	 * @typedef {array} ProposalResponseObject
-	 * @property {array} index:0 - Array of ProposalResponse objects from the endorsing peers
-	 * @property {Object} index:1 - The original Proposal object needed when sending the transaction
-	 *                              request to the orderer
+	 * @property {Array<(ProposalResponse|Error)>} index:0 - Array where each element is either a ProposalResponse
+	 *           object (for a successful response from the endorsing peer) or an Error object (for an unsuccessful
+	 *           peer response or runtime error).
+	 * @property {Object} index:1 - The original Proposal object needed when
+	 *           sending the transaction request to the orderer
 	 */
 
 	/**
-	 * In fabric v1.0, a chaincode must be installed and instantiated before it
-	 * can be called to process transactions.
+	 * A chaincode must be installed to peers and instantiated on a channel
+	 * before it can be called to process transactions.
 	 * <br><br>
 	 * Chaincode installation is simply uploading the chaincode source and
 	 * dependencies to the peers. This operation is "channel-agnostic" and is
@@ -1015,145 +1086,125 @@ var Client = class extends BaseClient {
 	 *
 	 * @param {ChaincodeInstallRequest} request - The request object
 	 * @param {Number} timeout - A number indicating milliseconds to wait on the
-	 *                              response before rejecting the promise with a
-	 *                              timeout error. This overrides the default timeout
-	 *                              of the Peer instance and the global timeout in the config settings.
+	 *        response before rejecting the promise with a timeout error. This
+	 *        overrides the default timeout of the Peer instance and the global
+	 *        timeout in the config settings.
 	 * @returns {Promise} A Promise for a {@link ProposalResponseObject}
 	 */
-	installChaincode(request, timeout) {
-		logger.debug('installChaincode - start');
+	async installChaincode(request, timeout) {
+		try {
+			logger.debug('installChaincode - start');
 
-		let error_msg = null;
+			// must provide a valid request object with:
+			// chaincodePackage
+			// -or-
+			// chaincodeId, chaincodeVersion, and chaincodePath
+			if (!request) {
+				throw new Error('Missing input request object on install chaincode request');
+			} else if (request.chaincodePackage) {
+				logger.debug('installChaincode - installing chaincode package');
+			} else if (!request.chaincodeId) {
+				throw new Error('Missing "chaincodeId" parameter in the proposal request');
+			} else if (!request.chaincodeVersion) {
+				throw new Error('Missing "chaincodeVersion" parameter in the proposal request');
+			} else if (!request.chaincodePath) {
+				throw new Error('Missing "chaincodePath" parameter in the proposal request');
+			}
 
-		let peers = null;
-		if (request) {
-			try {
-				peers = this.getTargetPeers(request.targets);
-				if(!peers) {
-					peers = this.getPeersForOrgOnChannel(request.channelNames);
-				}
-			} catch (err) {
-				return Promise.reject(err);
+			let peers = this.getTargetPeers(request.targets);
+			if (!peers && request.channelNames) {
+				peers = this.getPeersForOrgOnChannel(request.channelNames);
 			}
 
 			// Verify that a Peer has been added
 			if (peers && peers.length > 0) {
-				logger.debug('installChaincode - found peers ::%s',peers.length);
+				logger.debug(`installChaincode - found peers ::${peers.length}`);
+			} else {
+				throw new Error('Missing peer objects in install chaincode request');
 			}
-			else {
-				error_msg = 'Missing peer objects in install chaincode request';
+
+			let cdsBytes;
+			if (request.chaincodePackage) {
+				cdsBytes = request.chaincodePackage;
+				logger.debug(`installChaincode - using specified chaincode package (${cdsBytes.length} bytes)`);
+			} else if (this.isDevMode()) {
+				cdsBytes = null;
+				logger.debug('installChaincode - in dev mode, refusing to package chaincode');
+			} else {
+				const cdsPkg = await Package.fromDirectory({
+					name: request.chaincodeId,
+					version: request.chaincodeVersion,
+					path: request.chaincodePath,
+					type: request.chaincodeType,
+					metadataPath: request.metadataPath
+				});
+				cdsBytes = await cdsPkg.toBuffer();
+				logger.debug(`installChaincode - built chaincode package (${cdsBytes.length} bytes)`);
 			}
-		}
-		else {
-			error_msg = 'Missing input request object on install chaincode request';
-		}
 
-		if (!error_msg) error_msg = clientUtils.checkProposalRequest(request, true);
-		if (!error_msg) error_msg = clientUtils.checkInstallRequest(request);
-
-		if (error_msg) {
-			logger.error('installChaincode error ' + error_msg);
-			return Promise.reject(new Error(error_msg));
-		}
-
-		const self = this;
-
-		const ccSpec = {
-			type: clientUtils.translateCCType(request.chaincodeType),
-			chaincode_id: {
-				name: request.chaincodeId,
-				path: request.chaincodePath,
-				version: request.chaincodeVersion
-			}
-		};
-		logger.debug('installChaincode - ccSpec %s ',JSON.stringify(ccSpec));
-
-		// step 2: construct the ChaincodeDeploymentSpec
-		const chaincodeDeploymentSpec = new _ccProto.ChaincodeDeploymentSpec();
-		chaincodeDeploymentSpec.setChaincodeSpec(ccSpec);
-		chaincodeDeploymentSpec.setEffectiveDate(clientUtils.buildCurrentTimestamp()); //TODO may wish to add this as a request setting
-
-		return _getChaincodePackageData(request, this.isDevMode())
-			.then((data) => {
-			// DATA may or may not be present depending on devmode settings
-				if (data) {
-					chaincodeDeploymentSpec.setCodePackage(data);
-					logger.debug('installChaincode - found packaged data');
+			// TODO add ESCC/VSCC info here ??????
+			const lcccSpec = {
+				type: clientUtils.translateCCType(request.chaincodeType),
+				chaincode_id: {
+					name: Constants.LSCC
+				},
+				input: {
+					args: [Buffer.from('install', 'utf8'), cdsBytes]
 				}
-				logger.debug('installChaincode - sending deployment spec %s ',chaincodeDeploymentSpec);
+			};
 
-				// TODO add ESCC/VSCC info here ??????
-				const lcccSpec = {
-					type: ccSpec.type,
-					chaincode_id: {
-						name: Constants.LSCC
-					},
-					input: {
-						args: [Buffer.from('install', 'utf8'), chaincodeDeploymentSpec.toBuffer()]
-					}
-				};
+			let signer;
+			let tx_id = request.txId;
+			if (!tx_id) {
+				signer = this._getSigningIdentity(true);
+				tx_id = new TransactionID(signer, true);
+			} else {
+				signer = this._getSigningIdentity(tx_id.isAdmin());
+			}
 
-				let signer;
-				let tx_id = request.txId;
-				if(!tx_id) {
-					signer = self._getSigningIdentity(true);
-					tx_id = new TransactionID(signer, true);
-				} else {
-					signer = self._getSigningIdentity(tx_id.isAdmin());
-				}
-
-				const channelHeader = clientUtils.buildChannelHeader(
-					_commonProto.HeaderType.ENDORSER_TRANSACTION,
-					'', //install does not target a channel
-					tx_id.getTransactionID(),
-					null,
-					Constants.LSCC
-				);
-				const header = clientUtils.buildHeader(signer, channelHeader, tx_id.getNonce());
-				const proposal = clientUtils.buildProposal(lcccSpec, header);
-				const signed_proposal = clientUtils.signProposal(signer, proposal);
-				logger.debug('installChaincode - about to sendPeersProposal');
-				return clientUtils.sendPeersProposal(peers, signed_proposal, timeout)
-					.then(
-						function(responses) {
-							return [responses, proposal];
-						}
-					);
-			});
+			const channelHeader = clientUtils.buildChannelHeader(
+				_commonProto.HeaderType.ENDORSER_TRANSACTION,
+				'', // install does not target a channel
+				tx_id.getTransactionID(),
+				null,
+				Constants.LSCC
+			);
+			const header = clientUtils.buildHeader(signer, channelHeader, tx_id.getNonce());
+			const proposal = clientUtils.buildProposal(lcccSpec, header);
+			const signed_proposal = clientUtils.signProposal(signer, proposal);
+			logger.debug('installChaincode - about to sendPeersProposal');
+			const responses = await clientUtils.sendPeersProposal(peers, signed_proposal, timeout);
+			return [responses, proposal];
+		} catch (error) {
+			logger.error(`installChaincode error ${error.message}`);
+			throw error;
+		}
 	}
 
 	/**
 	 * Sets the state and crypto suite for use by this client.
-	 * This requires that a network config has been loaded. Will use the settings
-	 * from the network configuration along with the system configuration to build
+	 * This requires that a common connection profile has been loaded. Will use the settings
+	 * from the common connection profile along with the system configuration to build
 	 * instances of the stores and assign them to this client and the crypto suites
 	 * if needed.
 	 *
 	 * @returns {Promise} - A promise to build a key value store and crypto store.
 	 */
-	initCredentialStores() {
-		if(this._network_config) {
-			let client_config = this._network_config.getClientConfig();
-			if(client_config && client_config.credentialStore) {
-				const self = this;
-				return BaseClient.newDefaultKeyValueStore(client_config.credentialStore)
-					.then((key_value_store) =>{
-						self.setStateStore(key_value_store);
-						const crypto_suite = BaseClient.newCryptoSuite();
-						// not all crypto suites require a crypto store
-						if (typeof crypto_suite.setCryptoKeyStore == 'function') {
-							crypto_suite.setCryptoKeyStore(BaseClient.newCryptoKeyStore(client_config.credentialStore.cryptoStore));
-						}
-						self.setCryptoSuite(crypto_suite);
-						return Promise.resolve(true);
-					}).catch((err)=>{
-						return Promise.reject(err);
-					});
-			} else {
-				return Promise.reject(new Error('No credentialStore settings found'));
-			}
+	async initCredentialStores() {
+		if (!this._network_config) {
+			throw new Error('No common connection profile settings found');
+		}
+		const client_config = this._network_config.getClientConfig();
+		if (client_config && client_config.credentialStore) {
+			const key_value_store = await BaseClient.newDefaultKeyValueStore(client_config.credentialStore);
+			this.setStateStore(key_value_store);
+			const crypto_suite = BaseClient.newCryptoSuite();
+			// all crypto suites should extends api.CryptoSuite
+			crypto_suite.setCryptoKeyStore(BaseClient.newCryptoKeyStore(client_config.credentialStore.cryptoStore));
+			this.setCryptoSuite(crypto_suite);
+			return true;
 		} else {
-			return Promise.reject(new Error('No network configuration settings found'));
+			throw new Error('No credentialStore settings found');
 		}
 	}
 
@@ -1172,7 +1223,7 @@ var Client = class extends BaseClient {
 		let err = '';
 
 		const methods = sdkUtils.getClassMethods(api.KeyValueStore);
-		methods.forEach(function(m) {
+		methods.forEach((m) => {
 			if (typeof keyValueStore[m] !== 'function') {
 				err += m + '() ';
 			}
@@ -1197,11 +1248,11 @@ var Client = class extends BaseClient {
 	 *          the private key for signing
 	 */
 	_getSigningIdentity(admin) {
-		logger.debug('_getSigningIdentity - admin parameter is %s :%s',(typeof admin),admin);
-		if(admin && this._adminSigningIdentity) {
+		logger.debug('_getSigningIdentity - admin parameter is %s :%s', (typeof admin), admin);
+		if (admin && this._adminSigningIdentity) {
 			return this._adminSigningIdentity;
 		} else {
-			if(this._userContext) {
+			if (this._userContext) {
 				return this._userContext.getSigningIdentity();
 			} else {
 				throw new Error('No identity has been assigned to this client');
@@ -1218,7 +1269,7 @@ var Client = class extends BaseClient {
 	 * @param {string} mspid The Member Service Provider id for the local signing identity
 	 */
 	setAdminSigningIdentity(private_key, certificate, mspid) {
-		logger.debug('setAdminSigningIdentity - start mspid:%s',mspid);
+		logger.debug('setAdminSigningIdentity - start mspid:%s', mspid);
 		if (typeof private_key === 'undefined' || private_key === null || private_key === '') {
 			throw new Error('Invalid parameter. Must have a valid private key.');
 		}
@@ -1229,10 +1280,10 @@ var Client = class extends BaseClient {
 			throw new Error('Invalid parameter. Must have a valid mspid.');
 		}
 		let crypto_suite = this.getCryptoSuite();
-		if(!crypto_suite) {
+		if (!crypto_suite) {
 			crypto_suite = BaseClient.newCryptoSuite();
 		}
-		const key = crypto_suite.importKey(private_key, {ephemeral : true});
+		const key = crypto_suite.importKey(private_key, {ephemeral: true});
 		const public_key = crypto_suite.importKey(certificate, {ephemeral: true});
 
 		this._adminSigningIdentity = new SigningIdentity(certificate, public_key, mspid, crypto_suite, new Signer(crypto_suite, key));
@@ -1240,97 +1291,131 @@ var Client = class extends BaseClient {
 
 	/*
 	 * Utility method to set the admin signing identity object based on the current
-	 * organization defined in the network configuration. A network configuration
+	 * organization defined in the common connection profile. A common connection profile
 	 * be must loaded that defines an organization for this client and have an
 	 * admin credentials defined.
 	 */
 	_setAdminFromConfig() {
 		let admin_key, admin_cert, mspid = null;
-		if(!this._network_config) {
-			throw new Error('No network configuration has been loaded');
+		if (!this._network_config) {
+			throw new Error('No common connection profile has been loaded');
 		}
 
-		let client_config = this._network_config.getClientConfig();
-		if(client_config && client_config.organization) {
-			let organization_config = this._network_config.getOrganization(client_config.organization);
-			if(organization_config) {
+		const client_config = this._network_config.getClientConfig();
+		if (client_config && client_config.organization) {
+			const organization_config = this._network_config.getOrganization(client_config.organization, true);
+			if (organization_config) {
 				mspid = organization_config.getMspid();
 				admin_key = organization_config.getAdminPrivateKey();
 				admin_cert = organization_config.getAdminCert();
 			}
 		}
 		// if we found all we need then set the admin
-		if(admin_key && admin_cert && mspid) {
+		if (admin_key && admin_cert && mspid) {
 			this.setAdminSigningIdentity(admin_key, admin_cert, mspid);
 		}
 	}
 
 	/*
+	 * Utility method to set the mspid from current common connection profile.
+	 * A common connection profile be must loaded and defines both an organization
+	 * and the client.
+	 */
+	_setMspidFromConfig() {
+		if (!this._network_config) {
+			throw new Error('No common connection profile has been loaded');
+		}
+
+		const client_config = this._network_config.getClientConfig();
+		if (client_config && client_config.organization) {
+			const organization_config = this._network_config.getOrganization(client_config.organization, true);
+			if (organization_config) {
+				this._mspid = organization_config.getMspid();
+			}
+		}
+	}
+
+	/*
+	 * Utility method to add connection options from the current common connection profile
+	 * client section into this client.
+	 */
+	_addConnectionOptionsFromConfig() {
+		if (!this._network_config) {
+			throw new Error('No common connection profile has been loaded');
+		}
+
+		const client_config = this._network_config.getClientConfig();
+		if (client_config && client_config.connection && client_config.connection.options) {
+			this.addConnectionOptions(client_config.connection.options);
+		}
+	}
+
+	/**
 	 * Utility Method
 	 * Sets the user context based on the passed in username and password
-	 * and the organization in the client section of the network configuration
+	 * and the organization in the client section of the common connection profile
 	 * settings.
 	 *
 	 * @param {Object} opts - contains
 	 *                  - username [required] - username of the user
 	 *                  - password [optional] - password of the user
+	 *                  - caName [optional] - name of the Certificate Authority
 	 */
-	_setUserFromConfig(opts) {
-		if (!opts || typeof opts.username === 'undefined' || opts.username === null || opts.username === '') {
-			return Promise.reject( new Error('Missing parameter. Must have a username.'));
+	async _setUserFromConfig(opts = {}) {
+		if (!opts.username) {
+			throw new Error('Missing parameter. Must have a username.');
 		}
-		if(!this._network_config || !this._stateStore || !this._cryptoSuite ) {
-			return Promise.reject(new Error('Client requires a network configuration loaded, stores attached, and crypto suite.'));
+		if (!this._network_config || !this._stateStore || !this._cryptoSuite) {
+			throw new Error('Client requires a common connection profile loaded, stores attached, and crypto suite.');
 		}
 		this._userContext = null;
-		const self = this;
-		return self.getUserContext(opts.username, true)
-			.then((user) => {
-				return new Promise((resolve, reject) => {
-					if (user && user.isEnrolled()) {
-						logger.debug('Successfully loaded member from persistence');
-						return resolve(user);
-					}
 
-					if (typeof opts.password === 'undefined' || opts. password === null || opts. password === '') {
-						return reject( new Error('Missing parameter. Must have a password.'));
-					}
+		const user = await this.getUserContext(opts.username, true);
+		if (user && user.isEnrolled()) {
+			logger.debug('Successfully loaded member from persistence');
+			return user;
+		}
 
-					let ca_service, mspid = null;
-					try {
-						const client_config = this._network_config.getClientConfig();
-						if(client_config && client_config.organization) {
-							const organization_config = this._network_config.getOrganization(client_config.organization);
-							if(organization_config) {
-								mspid = organization_config.getMspid();
-							}
-						}
-						if(!mspid) {
-							throw new Error('Network configuration is missing this client\'s organization and mspid');
-						}
-						ca_service = self.getCertificateAuthority();
-					} catch(err) {
-						reject(err);
-					}
+		if (!opts.password) {
+			throw new Error('Missing parameter. Must have a password.');
+		}
 
-					return ca_service.enroll({
-						enrollmentID: opts.username,
-						enrollmentSecret: opts.password
-					}).then((enrollment) => {
-						logger.debug('Successfully enrolled user "%s"',opts.username);
+		let mspid = null;
+		const client_config = this._network_config.getClientConfig();
+		if (client_config && client_config.organization) {
+			const organization_config = this._network_config.getOrganization(client_config.organization, true);
+			if (organization_config) {
+				mspid = organization_config.getMspid();
+			}
+		}
+		if (!mspid) {
+			throw new Error('Common connection profile is missing this client\'s organization and mspid');
+		}
+		const ca_service = this.getCertificateAuthority(opts.caName);
 
-						return self.createUser(
-							{username: opts.username,
-								mspid: mspid,
-								cryptoContent: { privateKeyPEM: enrollment.key.toBytes(), signedCertPEM: enrollment.certificate }
-							});
-					}).then((member) => {
-						return resolve(member);
-					}).catch((err) => {
-						logger.error('Failed to enroll and persist user. Error: ' + err.stack ? err.stack : err);
-						reject(err);
-					});
-				});
+		const enrollment = await ca_service.enroll({
+			enrollmentID: opts.username,
+			enrollmentSecret: opts.password
+		});
+		logger.debug(`Successfully enrolled user "${opts.username}"`);
+
+		const cryptoContent = {signedCertPEM: enrollment.certificate};
+		let keyBytes = null;
+		try {
+			keyBytes = enrollment.key.toBytes();
+		} catch (err) {
+			logger.debug('Cannot access enrollment private key bytes');
+		}
+		if (keyBytes !== null && keyBytes.startsWith('-----BEGIN')) {
+			cryptoContent.privateKeyPEM = keyBytes;
+		} else {
+			cryptoContent.privateKeyObj = enrollment.key;
+		}
+		return this.createUser(
+			{
+				username: opts.username,
+				mspid: mspid,
+				cryptoContent: cryptoContent
 			});
 	}
 
@@ -1339,50 +1424,38 @@ var Client = class extends BaseClient {
 	 *
 	 * @returns {Promise} A Promise for the userContext object upon successful persistence
 	 */
-	saveUserToStateStore() {
-		const self = this;
-		logger.debug('saveUserToStateStore, userContext: ' + self._userContext);
-		return new Promise(function(resolve, reject) {
-			if (self._userContext && self._userContext._name && self._stateStore) {
-				logger.debug('saveUserToStateStore, begin promise stateStore.setValue');
-				self._stateStore.setValue(self._userContext._name, self._userContext.toString())
-					.then(
-						function(result) {
-							logger.debug('saveUserToStateStore, store.setValue, result = ' + result);
-							resolve(self._userContext);
-						},
-						function (reason) {
-							logger.debug('saveUserToStateStore, store.setValue, reject reason = ' + reason);
-							reject(reason);
-						}
-					).catch(
-						function(err) {
-							logger.debug('saveUserToStateStore, store.setValue, error: ' +err);
-							reject(new Error(err));
-						}
-					);
-			} else {
-				if (!self._userContext) {
-					logger.debug('saveUserToStateStore Promise rejected, Cannot save user to state store when userContext is null.');
-					reject(new Error('Cannot save user to state store when userContext is null.'));
-				} else if (!self._userContext._name) {
-					logger.debug('saveUserToStateStore Promise rejected, Cannot save user to state store when userContext has no name.');
-					reject(new Error('Cannot save user to state store when userContext has no name.'));
-				} else {
-					logger.debug('saveUserToStateStore Promise rejected, Cannot save user to state store when stateStore is null.');
-					reject(new Error('Cannot save user to state store when stateStore is null.'));
-				}
-			}
-		});
+	async saveUserToStateStore() {
+		logger.debug(`saveUserToStateStore, userContext: ${this._userContext}`);
+
+		if (!this._userContext) {
+			logger.debug('saveUserToStateStore Promise rejected, Cannot save user to state store when userContext is null.');
+			throw new Error('Cannot save user to state store when userContext is null.');
+		}
+		if (!this._userContext._name) {
+			logger.debug('saveUserToStateStore Promise rejected, Cannot save user to state store when userContext has no name.');
+			throw new Error('Cannot save user to state store when userContext has no name.');
+		}
+		if (!this._stateStore) {
+			logger.debug('saveUserToStateStore Promise rejected, Cannot save user to state store when stateStore is null.');
+			throw new Error('Cannot save user to state store when stateStore is null.');
+		}
+
+		logger.debug('saveUserToStateStore, begin promise stateStore.setValue');
+		const result = await this._stateStore.setValue(this._userContext._name, this._userContext.toString());
+		logger.debug(`saveUserToStateStore, store.setValue, result = ${result}`);
+		return this._userContext;
 	}
+
 	/**
 	 * An alternate object to use on the 'setUserContext' call in place of the 'User' object.
 	 * When using this object it is assumed that the current 'Client' instance has been loaded
-	 * with a network configuration.
+	 * with a common connection profile.
 	 *
 	 * @typedef {Object} UserNamePasswordObject
-	 * @property {string} username - A string representing the user name of the user
-	 * @property {string} password - A string repsesenting the password of the user
+	 * @property {string} username - Required. A string representing the user name of the user
+	 * @property {string} password - Optional. A string repsesenting the password of the user
+	 * @property {string} caName - Optional. A string repsesenting the name of the Certificate Authority.
+	 If not specified, will use the first Certifcate Authority on the list.
 	 */
 
 	/**
@@ -1397,51 +1470,35 @@ var Client = class extends BaseClient {
 	 * @param {User | UserNamePasswordObject} user - An instance of the User class encapsulating the authenticated
 	 *                      user’s signing materials (private key and enrollment certificate).
 	 *                      The parameter may also be a {@link UserNamePasswordObject} that contains the username
-	 *                      and optionaly the password. A network configuration must has been loaded to use the
+	 *                      and optionally the password and caName. A common connection profile must has been loaded to use the
 	 *                      {@link UserNamePasswordObject} which will also create the user context and set it on
 	 *                      this client instance. The created user context will be based on the current network
 	 *                      configuration( i.e. the current organization's CA, current persistence stores).
 	 * @param {boolean} skipPersistence - Whether to skip saving the user object into persistence. Default is false and the
 	 *                                    method will attempt to save the user object to the state store. When using a
-	 *                                    network configuration and {@link UserNamePasswordObject}, the user object will
+	 *                                    common connection profile and {@link UserNamePasswordObject}, the user object will
 	 *                                    always be stored to the persistence store.
 	 * @returns {Promise} Promise of the 'user' object upon successful persistence of the user to the state store
 	 */
-	setUserContext(user, skipPersistence) {
-		logger.debug('setUserContext - user: ' + user + ', skipPersistence: ' + skipPersistence);
-		const self = this;
-		console.log('setUserContext - user: ' + user + ', skipPersistence: ' + skipPersistence)
-		return new Promise((resolve, reject) => {
-			if (user) {
-				if(user.constructor && user.constructor.name === 'User') {
-					self._userContext = user;
-					if (!skipPersistence) {
-						logger.debug('setUserContext - begin promise to saveUserToStateStore');
-						self.saveUserToStateStore()
-							.then((return_user) => {
-								return resolve(return_user);
-							}).catch((err) => {
-								reject(err);
-							});
-					} else {
-						logger.debug('setUserContext - resolved user');
-						return resolve(user);
-					}
-				} else {
-					// must be they have passed in an object
-					logger.debug('setUserContext - will try to use network configuration to set the user');
-					self._setUserFromConfig(user)
-						.then((return_user) => {
-							return resolve(return_user);
-						}).catch((err) => {
-							reject(err);
-						});
-				}
-			} else {
-				logger.debug('setUserContext, Cannot save null userContext');
-				reject(new Error('Cannot save null userContext.'));
+	async setUserContext(user, skipPersistence) {
+		logger.debug(`setUserContext - user: ${user}, skipPersistence: ${skipPersistence}`);
+		if (!user) {
+			logger.debug('setUserContext, Cannot save null userContext.');
+			throw new Error('Cannot save null userContext.');
+		}
+
+		if (user instanceof User) {
+			this._userContext = user;
+			if (!skipPersistence) {
+				logger.debug('setUserContext - begin promise to saveUserToStateStore');
+				return this.saveUserToStateStore();
 			}
-		});
+			logger.debug('setUserContext - resolved user');
+			return user;
+		}
+		// must be they have passed in an object
+		logger.debug('setUserContext - will try to use common connection profile to set the user');
+		return this._setUserFromConfig(user);
 	}
 
 	/**
@@ -1455,38 +1512,32 @@ var Client = class extends BaseClient {
 	 * (via the KeyValueStore interface). The loaded user object must represent an enrolled user with a valid
 	 * enrollment certificate signed by a trusted CA (such as the CA server).
 	 *
-	 * @param {String} name - Optional. If not specified, will only return the current in-memory user context object, or null
+	 * @param {string} name - Optional. If not specified, will only return the current in-memory user context object, or null
 	 *                        if none has been set. If "name" is specified, will also attempt to load it from the state store
 	 *                        if search in memory failed.
 	 * @param {boolean} checkPersistence - Optional. If specified and truthy, the method returns a Promise and will
 	 *                                     attempt to check the state store for the requested user by the "name". If not
 	 *                                     specified or falsey, the method is synchronous and returns the requested user from memory
-	 * @returns {Promise | User} Promise for the user object corresponding to the name, or null if the user does not exist or if the
-	 *                           state store has not been set. If "checkPersistence" is not specified or false, then the user object
-	 *                           is returned synchronously.
+	 * @returns {Promise<User>} Promise for the user object corresponding to the name, or null if the user does not exist or if the
+	 *                           state store has not been set.
 	 */
-	getUserContext(name, checkPersistence) {
+	async getUserContext(name, checkPersistence) {
 		// first check if only one param is passed in for "checkPersistence"
-		if (typeof name === 'boolean' && name && typeof checkPersistence === 'undefined')
+		if (typeof name === 'boolean' && name && typeof checkPersistence === 'undefined') {
 			throw new Error('Illegal arguments: "checkPersistence" is truthy but "name" is undefined');
+		}
 
 		if (typeof checkPersistence === 'boolean' && checkPersistence &&
-			(typeof name !== 'string' || name === null || name === ''))
+			(typeof name !== 'string' || name === null || name === '')) {
 			throw new Error('Illegal arguments: "checkPersistence" is truthy but "name" is not a valid string value');
+		}
 
-		const self = this;
 		const username = name;
-		if ((self._userContext && name && self._userContext.getName() === name) || (self._userContext && !name)) {
-			if (typeof checkPersistence === 'boolean' && checkPersistence)
-				return Promise.resolve(self._userContext);
-			else
-				return self._userContext;
+		if ((this._userContext && name && this._userContext.getName() === name) || (this._userContext && !name)) {
+			return this._userContext;
 		} else {
 			if (!username) {
-				if (typeof checkPersistence === 'boolean' && checkPersistence)
-					return Promise.resolve(null);
-				else
-					return null;
+				return null;
 			}
 
 			// this could be because the application has not set a user context yet for this client, which would
@@ -1495,33 +1546,22 @@ var Client = class extends BaseClient {
 
 			// first check if there is a user context of the specified name in persistence
 			if (typeof checkPersistence === 'boolean' && checkPersistence) {
-				if (self._stateStore) {
-					return self.loadUserFromStateStore(username).then(
-						function(userContext) {
-							if (userContext) {
-								logger.debug('Requested user "%s" loaded successfully from the state store on this Client instance: name - %s', name, name);
-								return self.setUserContext(userContext, true); //skipPersistence as we just got it from there
-							} else {
-								logger.debug('Requested user "%s" not loaded from the state store on this Client instance: name - %s', name, name);
-								return null;
-							}
-						}
-					).then(
-						function(userContext) {
-							return Promise.resolve(userContext);
-						}
-					).catch(
-						function(err) {
-							logger.error('Failed to load an instance of requested user "%s" from the state store on this Client instance. Error: %s', name, err.stack ? err.stack : err);
-							return Promise.reject(err);
-						}
-					);
-				} else {
+				if (!this._stateStore) {
 					// we don't have it in memory or persistence, just return null
-					return Promise.resolve(null);
+					return null;
 				}
-			} else
+				const userContext = await this.loadUserFromStateStore(username);
+
+				if (userContext) {
+					logger.debug(`Requested user "${name}" loaded successfully from the state store on this Client instance`);
+					return this.setUserContext(userContext, true); // skipPersistence as we just got it from there
+				} else {
+					logger.debug(`Requested user "${name}" not loaded from the state store on this Client instance`);
+					return null;
+				}
+			} else {
 				return null;
+			}
 		}
 	}
 
@@ -1532,41 +1572,26 @@ var Client = class extends BaseClient {
 	 * @returns {Promise} A Promise for a {User} object upon successful restore, or if the user by the name
 	 *                    does not exist in the state store, returns null without rejecting the promise
 	 */
-	loadUserFromStateStore(name) {
-		const self = this;
+	async loadUserFromStateStore(name) {
+		const memberStr = await this._stateStore.getValue(name);
+		if (!memberStr) {
+			logger.debug(`Failed to find "${name}" in local key value store`);
+			return null;
+		}
 
-		return new Promise(function(resolve, reject) {
-			self._stateStore.getValue(name)
-				.then(
-					function(memberStr) {
-						if (memberStr) {
-						// The member was found in the key value store, so restore the state.
-							const newUser = new User(name);
-							if (!self.getCryptoSuite()) {
-								logger.debug('loadUserFromStateStore, cryptoSuite is not set, will load using defaults');
-							}
-							newUser.setCryptoSuite(self.getCryptoSuite());
-
-							return newUser.fromString(memberStr);
-						} else {
-							return null;
-						}
-					})
-				.then(function(data) {
-					if (data) {
-						logger.debug('Successfully loaded user "%s" from local key value store', name);
-						return resolve(data);
-					} else {
-						logger.debug('Failed to load user "%s" from local key value store', name);
-						return resolve(null);
-					}
-				}).catch(
-					function(err) {
-						logger.error('Failed to load user "%s" from local key value store. Error: %s', name, err.stack ? err.stack : err);
-						reject(err);
-					}
-				);
-		});
+		// The member was found in the key value store, so restore the state.
+		const newUser = new User(name);
+		if (!this.getCryptoSuite()) {
+			logger.debug('loadUserFromStateStore, cryptoSuite is not set, will load using defaults');
+		}
+		newUser.setCryptoSuite(this.getCryptoSuite());
+		const data = await newUser.fromString(memberStr, true);
+		if (!data) {
+			logger.debug(`Failed to load user "${name}" from local key value store`);
+			return null;
+		}
+		logger.debug(`Successfully load user "${name}" from local key value store`);
+		return data;
 	}
 
 	/**
@@ -1580,8 +1605,8 @@ var Client = class extends BaseClient {
 
 	/**
 	 * @typedef {Object} UserOpts
-	 * @property {string} username {string} - the user name used for enrollment
-	 * @property {string} mspid {string} - the MSP id
+	 * @property {string} username - the user name used for enrollment
+	 * @property {string} mspid - the MSP id
 	 * @property {CryptoContent} cryptoContent - the private key and certificate
 	 * @property {boolean} skipPersistence - whether to save this new user object into persistence.
 	 */
@@ -1608,127 +1633,94 @@ var Client = class extends BaseClient {
 	 * @param {UserOpts} opts - Essential information about the user
 	 * @returns {Promise} Promise for the user object.
 	 */
-	createUser(opts) {
+	async createUser(opts) {
 		logger.debug('opts = %j', opts);
 		if (!opts) {
-			return Promise.reject(new Error('Client.createUser missing required \'opts\' parameter.'));
+			throw new Error('Client.createUser missing required \'opts\' parameter.');
 		}
-		if (!opts.username || opts.username && opts.username.length < 1) {
-			return Promise.reject(new Error('Client.createUser parameter \'opts username\' is required.'));
+		if (!opts.username || opts.username.length < 1) {
+			throw new Error('Client.createUser parameter \'opts username\' is required.');
 		}
-		if (!opts.mspid || opts.mspid && opts.mspid.length < 1) {
-			return Promise.reject(new Error('Client.createUser parameter \'opts mspid\' is required.'));
+		if (!opts.mspid || opts.mspid.length < 1) {
+			throw new Error('Client.createUser parameter \'opts mspid\' is required.');
 		}
 		if (opts.cryptoContent) {
 			if (!opts.cryptoContent.privateKey && !opts.cryptoContent.privateKeyPEM && !opts.cryptoContent.privateKeyObj) {
-				return Promise.reject(new Error('Client.createUser one of \'opts cryptoContent privateKey, privateKeyPEM or privateKeyObj\' is required.'));
+				throw new Error('Client.createUser one of \'opts cryptoContent privateKey, privateKeyPEM or privateKeyObj\' is required.');
 			}
 			if (!opts.cryptoContent.signedCert && !opts.cryptoContent.signedCertPEM) {
-				return Promise.reject(new Error('Client.createUser either \'opts cryptoContent signedCert or signedCertPEM\' is required.'));
+				throw new Error('Client.createUser either \'opts cryptoContent signedCert or signedCertPEM\' is required.');
 			}
 		} else {
-			return Promise.reject(new Error('Client.createUser parameter \'opts cryptoContent\' is required.'));
+			throw new Error('Client.createUser parameter \'opts cryptoContent\' is required.');
 		}
 
-		if (this.getCryptoSuite() == null) {
+		if (this.getCryptoSuite() === null) {
 			logger.debug('cryptoSuite is null, creating default cryptoSuite and cryptoKeyStore');
 			this.setCryptoSuite(sdkUtils.newCryptoSuite());
-			this.getCryptoSuite().setCryptoKeyStore(Client.newCryptoKeyStore());
+			this.getCryptoSuite().setCryptoKeyStore(Client.newCryptoKeyStore()); // This is impossible
 		} else {
-			if (this.getCryptoSuite()._cryptoKeyStore) logger.debug('cryptoSuite has a cryptoKeyStore');
-			else logger.debug('cryptoSuite does not have a cryptoKeyStore');
+			if (this.getCryptoSuite()._cryptoKeyStore) {
+				logger.debug('cryptoSuite has a cryptoKeyStore');
+			} else {
+				logger.debug('cryptoSuite does not have a cryptoKeyStore');
+			}
 		}
 
-		const self = this;
-		return new Promise((resolve, reject) => {
-			// need to load private key and pre-enrolled certificate from files based on the MSP
-			// root MSP config directory structure:
-			// <config>
-			//    \_ keystore
-			//       \_ admin.pem  <<== this is the private key saved in PEM file
-			//    \_ signcerts
-			//       \_ admin.pem  <<== this is the signed certificate saved in PEM file
+		// need to load private key and pre-enrolled certificate from files based on the MSP
+		// root MSP config directory structure:
+		// <config>
+		//    \_ keystore
+		//       \_ admin.pem  <<== this is the private key saved in PEM file
+		//    \_ signcerts
+		//       \_ admin.pem  <<== this is the signed certificate saved in PEM file
 
-			// first load the private key and save in the BCCSP's key store
-			var promise, member, importedKey;
+		// first load the private key and save in the BCCSP's key store
 
-			if (opts.cryptoContent.privateKey) {
-				promise = readFile(opts.cryptoContent.privateKey);
-			} else if (opts.cryptoContent.privateKeyPEM){
-				promise = Promise.resolve(opts.cryptoContent.privateKeyPEM);
+		let importedKey;
+		const user = new User(opts.username);
+		let privateKeyPEM = opts.cryptoContent.privateKeyPEM;
+		if (opts.cryptoContent.privateKey) {
+			privateKeyPEM = await readFile(opts.cryptoContent.privateKey);
+		}
+		if (privateKeyPEM) {
+			logger.debug('then privateKeyPEM data');
+			if (opts.skipPersistence) {
+				importedKey = await this.getCryptoSuite().importKey(privateKeyPEM.toString(), {ephemeral: true});
 			} else {
-				importedKey = opts.cryptoContent.privateKeyObj;
-				promise = Promise.resolve();
+				importedKey = await this.getCryptoSuite().importKey(privateKeyPEM.toString(), {ephemeral: !this.getCryptoSuite()._cryptoKeyStore});
 			}
-			promise.then((data) => {
-				if (data) {
-					logger.debug('then privateKeyPEM data');
-					var opt1;
-					if (self.getCryptoSuite()._cryptoKeyStore) {
-						opt1 = { ephemeral: false };
-					} else {
-						opt1 = { ephemeral: true };
-					}
-					return self.getCryptoSuite().importKey(data.toString(), opt1);
-				} else {
-					return importedKey;
-				}
-			}).then((key) => {
-				logger.debug('then key');
-				importedKey = key;
-				// next save the certificate in a serialized user enrollment in the state store
-				if (opts.cryptoContent.signedCert) {
-					promise = readFile(opts.cryptoContent.signedCert);
-				} else {
-					promise = Promise.resolve(opts.cryptoContent.signedCertPEM);
-				}
-				return promise;
-			}).then((data) => {
-				logger.debug('then signedCertPEM data');
-				member = new User(opts.username);
-				member.setCryptoSuite(self.getCryptoSuite());
-				return member.setEnrollment(importedKey, data.toString(), opts.mspid);
-			}).then(() => {
-				logger.debug('then setUserContext');
-				return self.setUserContext(member, opts.skipPersistence);
-			}, (err) => {
-				logger.debug('error during setUserContext...');
-				logger.error(err.stack ? err.stack : err);
-				return reject(err);
-			}).then((user) => {
-				logger.debug('then user');
-				return resolve(user);
-			}).catch((err) => {
-				logger.error(err.stack ? err.stack : err);
-				return reject(new Error('Failed to load key or certificate and save to local stores.'));
-			});
-		});
+		} else {
+			importedKey = opts.cryptoContent.privateKeyObj;
+		}
+		let signedCertPEM = opts.cryptoContent.signedCertPEM;
+		if (opts.cryptoContent.signedCert) {
+			signedCertPEM = await readFile(opts.cryptoContent.signedCert);
+		}
+		logger.debug('then signedCertPEM data');
+		user.setCryptoSuite(this.getCryptoSuite());
+		await user.setEnrollment(importedKey, signedCertPEM.toString(), opts.mspid, opts.skipPersistence);
+		logger.debug('then setUserContext');
+		await this.setUserContext(user, opts.skipPersistence);
+		logger.debug('then user');
+		return user;
 	}
 
 	/*
 	 * utility method to get the peer targets
 	 */
 	getTargetPeers(request_targets) {
-		logger.debug('%s - start','getTargetPeers');
+		logger.debug('%s - start', 'getTargetPeers');
 		const targets = [];
 		let targetsTemp = request_targets;
-		if(request_targets) {
-			if(!Array.isArray(request_targets)) {
+		if (request_targets) {
+			if (!Array.isArray(request_targets)) {
 				targetsTemp = [request_targets];
 			}
-			for(let target_peer of targetsTemp) {
-				if(typeof target_peer === 'string') {
-					if(this._network_config) {
-						const peer = this._network_config.getPeer(target_peer);
-						if(peer) {
-							targets.push(peer);
-						} else {
-							throw new Error('Target peer name was not found');
-						}
-					} else {
-						throw new Error('No network configuraton loaded');
-					}
-				} else if(target_peer && target_peer.constructor && target_peer.constructor.name === 'Peer') {
+			for (const target_peer of targetsTemp) {
+				if (typeof target_peer === 'string') {
+					targets.push(this.getPeer(target_peer));
+				} else if (target_peer && target_peer.constructor && target_peer.constructor.name === 'Peer') {
 					targets.push(target_peer);
 				} else {
 					throw new Error('Target peer is not a valid peer object instance');
@@ -1736,54 +1728,50 @@ var Client = class extends BaseClient {
 			}
 		}
 
-		if(targets.length > 0) {
+		if (targets.length > 0) {
+
 			return targets;
 		} else {
+
 			return null;
 		}
 	}
 
 	/*
 	 * Utility method to get the orderer for the request
-	 * Will find the orderer is this sequence:
+	 * Will find the orderer in this sequence:
 	 *    if request_orderer is an object, will check that it is an orderer
-	 *    if request_orderer is a string will look up in the network configuration the orderer by that name
+	 *    if request_orderer is a string will look up in the common connection profile the orderer by that name
 	 *    if channel_orderers is not null then this index 0 will be used
 	 *    if channel_name is not null will look up the channel to see if there is an orderer defined in the
-	 *        network configuration
+	 *        common connection profile
 	 *    will throw an error in all cases if there is not a valid orderer to return
 	 */
 	getTargetOrderer(request_orderer, channel_orderers, channel_name) {
-		logger.debug('%s - start','getTargetOrderer');
+		logger.debug('%s - start', 'getTargetOrderer');
 		let orderer = null;
-		if(request_orderer) {
-			if(typeof request_orderer === 'string') {
-				if(this._network_config) {
-					orderer = this._network_config.getOrderer(request_orderer);
-					if(!orderer) {
-						throw new Error('Orderer name was not found in the network configuration');
-					}
-				}
-			} else if(request_orderer && request_orderer.constructor && request_orderer.constructor.name === 'Orderer') {
+		if (request_orderer) {
+			if (typeof request_orderer === 'string') {
+				orderer = this.getOrderer(request_orderer);
+			} else if (request_orderer && request_orderer.constructor && request_orderer.constructor.name === 'Orderer') {
 				orderer = request_orderer;
 			} else {
 				throw new Error('"orderer" request parameter is not valid. Must be an orderer name or "Orderer" object.');
 			}
-		} else if(channel_orderers && Array.isArray(channel_orderers) && channel_orderers[0]) {
+		} else if (channel_orderers && Array.isArray(channel_orderers) && channel_orderers[0]) {
 			orderer = channel_orderers[0];
-		} else if(channel_name && this._network_config) {
+		} else if (channel_name && this._network_config) {
 			const temp_channel = this.getChannel(channel_name, false);
-			if(temp_channel) {
+			if (temp_channel) {
 				const temp_orderers = temp_channel.getOrderers();
-				if(temp_orderers && temp_orderers.length > 0) {
+				if (temp_orderers && temp_orderers.length > 0) {
 					orderer = temp_orderers[0];
-				}
-				else {
+				} else {
 					throw new Error('"orderer" request parameter is missing and there' + ' ' +
-							'are no orderers defined on this channel in the network configuration');
+						'are no orderers defined on this channel in the common connection profile');
 				}
 			} else {
-				throw new Error(util.format('Channel name %s was not found in the network configuration',channel_name));
+				throw new Error(util.format('Channel name %s was not found in the common connection profile', channel_name));
 			}
 		} else {
 			throw new Error('Missing "orderer" request parameter');
@@ -1792,65 +1780,45 @@ var Client = class extends BaseClient {
 		return orderer;
 	}
 
-	/*
-	 * Utility method to get target peers from the network configuration
-	 * Will get the list of all peers for the current organization of this
-	 * client. If channel names are provided, the list will be filtered
-	 * down to be just the endorsing or chain code query peers as defined
-	 * in the channels. If no channels are provided the full org list
-	 * will be returned.
+	/**
+	 * Get the client certificate hash
+	 * @param {boolean} create - Optional. Create the hash based on the current
+	 *        user if the client cert has not been assigned to this client
+	 * @returns {byte[]} The hash of the client certificate
 	 */
-	getPeersForOrgOnChannel(channels) {
-		let method = 'getPeersForOrgOnChannel';
-		logger.debug('%s - starting',method);
-		let peers = [];
-		if(this._network_config && this._network_config.hasClient()) {
-			let org_peers = this.getPeersForOrg();
-			logger.debug('%s - have client config and an org_peers list with %s',method,org_peers.length);
-			if(channels) {
-				logger.debug('%s - have channels %s',method,channels);
-				if(!Array.isArray(channels)) {
-					channels = [channels];
-				}
-				peers = [];
-				let found_peers = {};
-				for(let i in channels) {
-					logger.debug('%s - looking at channel:%s',method,channels[i]);
-					let channel = this._network_config.getChannel(channels[i]);
-					let channel_peers = channel.getPeers();
-					for(let j in channel_peers) {
-						let channel_peer = channel_peers[j];
-						logger.debug('%s - looking at channel peer:%s',method,channel_peer.getName());
-						if(channel_peer.isInRole(Constants.NetworkConfig.ENDORSING_PEER_ROLE)
-						|| channel_peer.isInRole(Constants.NetworkConfig.CHAINCODE_QUERY_ROLE)) {
-							for(let k in org_peers) {
-								let org_peer = org_peers[k];
-								logger.debug('%s - looking at org peer:%s',method,org_peer.getName());
-								if(org_peer.getName() === channel_peer.getName()) {
-									found_peers[org_peer.getName()] = org_peer;//to avoid Duplicate Peers
-									logger.debug('%s - adding peer to list:%s',method,org_peer.getName());
-								}
-							}
-						}
-					}
-				}
-				for(let name in found_peers) {
-					logger.debug('%s - final list has:%s',method,name);
-					peers.push(found_peers[name]);
-				}
-			} else {
-				logger.debug('%s - return org list',method);
-				peers = org_peers;
-			}
+	getClientCertHash(create) {
+		const method = 'getClientCertHash';
+		logger.debug('%s - start', method);
+		if (this._tls_mutual.clientCertHash) {
+			return this._tls_mutual.clientCertHash;
+		}
+		if (!this._tls_mutual.clientCert && create) {
+			// this will create the cert and key from the current user if available
+			this.setTlsClientCertAndKey();
 		}
 
-		return peers;
+		if (this._tls_mutual.clientCert) {
+			logger.debug('%s - using clientCert %s', method, this._tls_mutual.clientCert);
+			const der_cert = sdkUtils.pemToDER(this._tls_mutual.clientCert);
+			this._tls_mutual.clientCertHash = computeHash(der_cert);
+		} else {
+			logger.debug('%s - no tls client cert', method);
+		}
+
+		return this._tls_mutual.clientCertHash;
 	}
 };
 
-function readFile(path) {
-	return new Promise(function(resolve, reject) {
-		fs.readFile(path, 'utf8', function (err, data) {
+// Compute hash for replay protection
+function computeHash(data) {
+	const sha256 = crypto.createHash('sha256');
+
+	return sha256.update(data).digest();
+}
+
+function readFile(filePath) {
+	return new Promise((resolve, reject) => {
+		fs.readFile(filePath, 'utf8', (err, data) => {
 			if (err) {
 				if (err.code !== 'ENOENT') {
 					return reject(err);
@@ -1858,74 +1826,61 @@ function readFile(path) {
 					return resolve(null);
 				}
 			}
+
 			return resolve(data);
 		});
-	});
-}
-
-// internal utility method to get the chaincodePackage data in bytes
-function _getChaincodePackageData(request, devMode) {
-	return new Promise((resolve,reject) => {
-		if (!request.chaincodePackage) {
-			logger.debug('_getChaincodePackageData -  build package with chaincodepath %s, chaincodeType %s, devMode %s, metadataPath %s',
-				request.chaincodePath, request.chaincodeType, devMode, request.metadataPath);
-			resolve(Packager.package(request.chaincodePath, request.chaincodeType, devMode, request.metadataPath));
-		} else {
-			logger.debug('_getChaincodePackageData - working with included chaincodePackage');
-			resolve(request.chaincodePackage);
-		}
 	});
 }
 
 // internal utility method to check and convert any strings to protobuf signatures
 function _stringToSignature(string_signatures) {
 	const signatures = [];
-	for(let signature of string_signatures) {
+	for (let signature of string_signatures) {
 		// check for properties rather than object type
-		if(signature && signature.signature_header && signature.signature) {
+		if (signature && signature.signature_header && signature.signature) {
 			logger.debug('_stringToSignature - signature is protobuf');
-		}
-		else {
+		} else {
 			logger.debug('_stringToSignature - signature is string');
 			const signature_bytes = Buffer.from(signature, 'hex');
 			signature = _configtxProto.ConfigSignature.decode(signature_bytes);
 		}
 		signatures.push(signature);
 	}
+
 	return signatures;
 }
 
-//internal utility method to get a NetworkConfig
-function _getNetworkConfig(config, client) {
+// internal utility method to get a NetworkConfig
+function _getNetworkConfig(loadConfig, client) {
 	let network_config = null;
 	let network_data = null;
-	if(typeof config === 'string') {
-		const config_loc = path.resolve(config);
-		
-		logger.debug('%s - looking at absolute path of ==>%s<==','_getNetworkConfig',config_loc);
+	if (typeof loadConfig === 'string') {
+		const config_loc = path.resolve(loadConfig);
+		logger.debug('%s - looking at absolute path of ==>%s<==', '_getNetworkConfig', config_loc);
 		const file_data = fs.readFileSync(config_loc);
 		const file_ext = path.extname(config_loc);
 		// maybe the file is yaml else has to be JSON
-		if(file_ext.indexOf('y') > -1) {
+		if ((/(yml|yaml)$/i).test(file_ext)) {
 			network_data = yaml.safeLoad(file_data);
 		} else {
 			network_data = JSON.parse(file_data);
 		}
 	} else {
-		network_data = config;
+		network_data = loadConfig;
 	}
+
 	let error_msg = null;
-	if(network_data) {
-		if(network_data.version) {
+	if (network_data) {
+		if (network_data.version) {
 			const parsing = Client.getConfigSetting('network-config-schema');
-			if(parsing) {
+			if (parsing) {
 				const pieces = network_data.version.toString().split('.');
 				const version = pieces[0] + '.' + pieces[1];
-				if(parsing[version]) {
+				if (parsing[version]) {
 					const NetworkConfig = require(parsing[version]);
 					network_config = new NetworkConfig(network_data, client);
 				} else {
-					error_msg = 'network configuration has an unknown "version"';
+					error_msg = 'common connection profile has an unknown "version"';
 				}
 			} else {
 				error_msg = 'missing "network-config-schema" configuration setting';
@@ -1937,8 +1892,8 @@ function _getNetworkConfig(config, client) {
 		error_msg = 'missing configuration data';
 	}
 
-	if(error_msg) {
-		throw new Error(util.format('Invalid network configuration due to %s',error_msg));
+	if (error_msg) {
+		throw new Error(util.format('Invalid common connection profile due to %s', error_msg));
 	}
 
 	return network_config;
@@ -1946,8 +1901,8 @@ function _getNetworkConfig(config, client) {
 
 module.exports = Client;
 module.exports.Peer = Peer;
-module.exports.EventHub = EventHub;
 module.exports.ChannelEventHub = ChannelEventHub;
 module.exports.Orderer = Orderer;
 module.exports.Channel = Channel;
 module.exports.User = User;
+module.exports.Package = Package;

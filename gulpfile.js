@@ -3,12 +3,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 */
-var requireDir = require('require-dir');
-var gulp = require('gulp');
+const requireDir = require('require-dir');
+const gulp = require('gulp');
 
 // Require all tasks in gulp/tasks, including subfolders
-requireDir('./build/tasks', { recurse: true });
+requireDir('./build/tasks', {recurse: true});
 
-gulp.task('default', ['lint'], function () {
-		// This will only run if the lint task is successful...
+gulp.task('default', ['check_license','ca'], () => {
+	// This will only run if the lint task is successful...
 });

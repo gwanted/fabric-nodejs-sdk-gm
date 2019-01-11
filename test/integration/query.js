@@ -1,17 +1,7 @@
 /**
  * Copyright 2017 IBM All Rights Reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 // This is an end to end test that focuses on exercising all parts of the fabric APIs
@@ -23,55 +13,59 @@
 
 'use strict';
 
-var utils = require('fabric-client/lib/utils.js');
-var logger = utils.getLogger('query');
+const utils = require('fabric-client/lib/utils.js');
+const logger = utils.getLogger('query');
 
-var tape = require('tape');
-var _test = require('tape-promise');
-var test = _test(tape);
+const tape = require('tape');
+const _test = require('tape-promise').default;
+const test = _test(tape);
 
-var path = require('path');
-var util = require('util');
-var e2eUtils = require('./e2e/e2eUtils.js');
-var fs = require('fs');
+const path = require('path');
+const util = require('util');
+const e2eUtils = require('./e2e/e2eUtils.js');
+const fs = require('fs');
 
-var testUtil = require('../unit/util.js');
-var Client = require('fabric-client');
-var Peer = require('fabric-client/lib/Peer.js');
-var Orderer = require('fabric-client/lib/Orderer.js');
+const testUtil = require('../unit/util.js');
+const Client = require('fabric-client');
+const Peer = require('fabric-client/lib/Peer.js');
+const Orderer = require('fabric-client/lib/Orderer.js');
+const BlockDecoder = require('fabric-client/lib/BlockDecoder.js');
 
-var client = new Client();
-var channel_id = testUtil.END2END.channel;
-var channel = client.newChannel(channel_id);
+const client = new Client();
+const channel_id = testUtil.END2END.channel;
+const channel = client.newChannel(channel_id);
 
-var org = 'org1';
-var orgName;
+const org = 'org1';
+let orgName;
 
-var e2e = testUtil.END2END;
-var ORGS, peer0;
+const e2e = testUtil.END2END;
+let ORGS, peer0;
 
 let tx_id = null;
 
-var data;
+let data;
 test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 	Client.addConfigFile(path.join(__dirname, 'e2e', 'config.json'));
 	ORGS = Client.getConfigSetting('test-network');
 	orgName = ORGS[org].name;
-	var caRootsPath = ORGS.orderer.tls_cacerts;
+	const caRootsPath = ORGS.orderer.tls_cacerts;
 	data = fs.readFileSync(path.join(__dirname, 'e2e', caRootsPath));
 
-	let caroots = Buffer.from(data).toString();
+	const caroots = Buffer.from(data).toString();
 	let tlsInfo = null;
+	let bcInfo = null;
+	let tx_block = null;
 
 	utils.setConfigSetting('key-value-store', 'fabric-client/lib/impl/FileKeyValueStore.js');
-	var cryptoSuite = Client.newCryptoSuite();
-	cryptoSuite.setCryptoKeyStore(Client.newCryptoKeyStore({ path: testUtil.storePathForOrg(orgName) }));
+	const cryptoSuite = Client.newCryptoSuite();
+	cryptoSuite.setCryptoKeyStore(Client.newCryptoKeyStore({path: testUtil.storePathForOrg(orgName)}));
 	client.setCryptoSuite(cryptoSuite);
 
 	return e2eUtils.tlsEnroll(org).then((enrollment) => {
 		t.pass('Successfully retrieved TLS certificate');
 		tlsInfo = enrollment;
-		return Client.newDefaultKeyValueStore({ path: testUtil.storePathForOrg(orgName) });
+		client.setTlsClientCertAndKey(tlsInfo.certificate, tlsInfo.key);
+		return Client.newDefaultKeyValueStore({path: testUtil.storePathForOrg(orgName)});
 	}).then((store) => {
 		client.setStateStore(store);
 		return testUtil.getSubmitter(client, t, org);
@@ -90,7 +84,7 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 			)
 		);
 
-		data = fs.readFileSync(path.join(__dirname, 'e2e', ORGS[org].peer1['tls_cacerts']));
+		data = fs.readFileSync(path.join(__dirname, 'e2e', ORGS[org].peer1.tls_cacerts));
 		peer0 = new Peer(
 			ORGS[org].peer1.requests,
 			{
@@ -99,14 +93,14 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 				'clientKey': tlsInfo.key,
 				'ssl-target-name-override': ORGS[org].peer1['server-hostname']
 			});
-		data = fs.readFileSync(path.join(__dirname, 'e2e', ORGS['org2'].peer1['tls_cacerts']));
-		var peer1 = new Peer(
-			ORGS['org2'].peer1.requests,
+		data = fs.readFileSync(path.join(__dirname, 'e2e', ORGS.org2.peer1.tls_cacerts));
+		const peer1 = new Peer(
+			ORGS.org2.peer1.requests,
 			{
 				pem: Buffer.from(data).toString(),
 				'clientCert': tlsInfo.certificate,
 				'clientKey': tlsInfo.key,
-				'ssl-target-name-override': ORGS['org2'].peer1['server-hostname']
+				'ssl-target-name-override': ORGS.org2.peer1['server-hostname']
 			});
 
 		channel.addPeer(peer0);
@@ -142,7 +136,7 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 		} else {
 			t.pass('Got tx_id from ConfigSetting "E2E_TX_ID"');
 			// send query
-			return channel.queryTransaction(tx_id, peer0); //assumes the end-to-end has run first
+			return channel.queryTransaction(tx_id, peer0); // assumes the end-to-end has run first
 		}
 	}).then((processed_transaction) => {
 		t.equals('mychannel', processed_transaction.transactionEnvelope.payload.header.channel_header.channel_id,
@@ -151,23 +145,27 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 			'test for header channel mspid in identity');
 		t.equals('Org1MSP', processed_transaction.transactionEnvelope.payload.data.actions['0']
 			.payload.action.endorsements['0'].endorser.Mspid,
-			'test for endorser mspid in identity');
+		'test for endorser mspid in identity');
 		t.equals('Org2MSP', processed_transaction.transactionEnvelope.payload.data.actions['0'].header.creator.Mspid,
 			'test for creator mspid in identity');
 		t.equals(200, processed_transaction.transactionEnvelope.payload.data.actions['0'].payload.action
 			.proposal_response_payload.extension.response.status,
-			'test for transation status');
+		'test for transation status');
 		t.equals(0, processed_transaction.transactionEnvelope.payload.data.actions['0']
 			.payload.action.proposal_response_payload.extension.results.data_model,
-			'test for data model value');
+		'test for data model value');
 		t.equals('a', processed_transaction.transactionEnvelope.payload.data.actions['0']
 			.payload.action.proposal_response_payload.extension.results.ns_rwset['0']
 			.rwset.writes['0'].key,
-			'test for write set key value');
-		t.equals('2', processed_transaction.transactionEnvelope.payload.data.actions['0']
+		'test for write set key value');
+		const block_num =  Number(processed_transaction.transactionEnvelope.payload.data.actions['0']
 			.payload.action.proposal_response_payload.extension.results.ns_rwset['0']
-			.rwset.reads[1].version.block_num.toString(),
-			'test for read set block num');
+			.rwset.reads[1].version.block_num.toString());
+		if (parseInt(block_num) >= 7) {
+			t.pass('Successfully test for read set block num');
+		} else {
+			t.fail('Failed test for read set block num - block_num >= 7 ::' + block_num);
+		}
 
 		// the "target peer" must be a peer in the same org as the app
 		// which in this case is "peer0"
@@ -178,7 +176,8 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 		logger.debug(' Channel queryInfo() returned block height=' + blockchainInfo.height);
 		logger.debug(' Channel queryInfo() returned block previousBlockHash=' + blockchainInfo.previousBlockHash);
 		logger.debug(' Channel queryInfo() returned block currentBlockHash=' + blockchainInfo.currentBlockHash);
-		var block_hash = blockchainInfo.currentBlockHash;
+		bcInfo = blockchainInfo;
+		const block_hash = blockchainInfo.currentBlockHash;
 		// send query
 		return channel.queryBlockByHash(block_hash, peer0);
 	}).then((block) => {
@@ -187,6 +186,69 @@ test('  ---->>>>> Query channel working <<<<<-----', (t) => {
 		return channel.queryBlockByTxID(tx_id);
 	}).then((block) => {
 		t.pass(util.format('Should find block[%s] by txid: %s', block.header.number, tx_id));
+		tx_block = block.header.number;
+
+		// query block skipping decoder
+		return channel.queryBlock(1, null, null, true);
+	}).then((binaryBlock) => {
+		if (!(binaryBlock instanceof Buffer)) {
+			t.fail('queryBlock(skipDecode = true) did not return a binary block');
+		} else {
+			const block = BlockDecoder.decode(binaryBlock);
+			if (block && block.header && block.header.number) {
+				t.pass('queryBlock(skipDecode = true) returned a decodable binary block');
+				t.equals(block.header.number, '1', 'block number is correct');
+			} else {
+				t.fail('queryBlock(skipDecode = true) did not return decodable binary block');
+			}
+		}
+
+		const block_hash = bcInfo.currentBlockHash;
+		// query by hash skipping decoder
+		return channel.queryBlockByHash(block_hash, peer0, null, true);
+	}).then((binaryBlock) => {
+		if (!(binaryBlock instanceof Buffer)) {
+			t.fail('queryBlockByHash(skipDecode = true) did not return a binary block');
+		} else {
+			const block = BlockDecoder.decode(binaryBlock);
+			if (block && block.header && block.header.number) {
+				t.pass('queryBlockByHash(skipDecode = true) returned a decodable binary block');
+				t.equals(block.header.number, (bcInfo.height - 1).toString(), 'block number is correct');
+			} else {
+				t.fail('queryBlockByHash(skipDecode = true) did not return decodable binary block');
+			}
+		}
+
+		// query by txid skipping decoder
+		return channel.queryBlockByTxID(tx_id, null, null, true);
+	}).then((binaryBlock) => {
+		if (!(binaryBlock instanceof Buffer)) {
+			t.fail('queryBlockByTxID(skipDecode = true) did not return a binary block');
+		} else {
+			const block = BlockDecoder.decode(binaryBlock);
+			if (block && block.header && block.header.number) {
+				t.pass('queryBlockByTxID(skipDecode = true) returned a decodable binary block');
+				t.equals(block.header.number, tx_block, 'block number is correct');
+			} else {
+				t.fail('queryBlockByTxID(skipDecode = true) did not return decodable binary block');
+			}
+		}
+
+		// query tx skipping decoder
+		return channel.queryTransaction(tx_id, peer0, null, true); // assumes the end-to-end has run first
+	}).then((binaryTx) => {
+		if (!(binaryTx instanceof Buffer)) {
+			t.fail('queryTransaction(skipDecode = true) did not return a binary transaction');
+		} else {
+			const tx = BlockDecoder.decodeTransaction(binaryTx);
+			if (tx && tx.transactionEnvelope && tx.transactionEnvelope.payload &&
+				tx.transactionEnvelope.payload.header && tx.transactionEnvelope.payload.header.channel_header) {
+				t.pass(util.format('queryTransaction(skipDecode = true) returned binary transaction which is decodable'));
+				t.equals(tx_id, tx.transactionEnvelope.payload.header.channel_header.tx_id, 'tx_id is correct');
+			} else {
+				t.fail('queryTransaction did not return a decodable binary transaction');
+			}
+		}
 		t.end();
 	}).catch((err) => {
 		t.fail('Query channel failed:%j', err);
@@ -204,7 +266,7 @@ test('  ---->>>>> Query channel failing: GetBlockByNumber <<<<<-----', (t) => {
 	}).then(() => {
 		t.pass('Successfully enrolled user \'admin\'');
 		// send query
-		return channel.queryBlock(9999999); //should not find it
+		return channel.queryBlock(9999999); // should not find it
 	}, (err) => {
 		t.fail('Failed to enroll user: ' + err.stack ? err.stack : err);
 		t.end();
@@ -228,7 +290,7 @@ test('  ---->>>>> Query channel failing: GetBlockByTxID <<<<<-----', (t) => {
 		client.setStateStore(store);
 		return testUtil.getSubmitter(client, t, org);
 	}).then(() => {
-		return channel.queryBlockByTxID(client.newTransactionID()); //should not find this txid
+		return channel.queryBlockByTxID(client.newTransactionID()); // should not find this txid
 	}, (err) => {
 		t.fail('Failed to enroll user: ' + err.stack ? err.stack : err);
 		t.end();
@@ -253,7 +315,7 @@ test('  ---->>>>> Query channel failing: GetTransactionByID <<<<<-----', (t) => 
 	}).then(() => {
 		t.pass('Successfully enrolled user \'admin\'');
 		// send query
-		return channel.queryTransaction('99999'); //assumes the end-to-end has run first
+		return channel.queryTransaction('99999'); // assumes the end-to-end has run first
 	}, (err) => {
 		t.fail('Failed to enroll user: ' + err.stack ? err.stack : err);
 		t.end();
@@ -305,7 +367,7 @@ test('  ---->>>>> Query channel failing: GetBlockByHash <<<<<-----', (t) => {
 	}).then(() => {
 		t.pass('Successfully enrolled user \'admin\'');
 		// send query
-		channel._name = channel_id; //put it back
+		channel._name = channel_id; // put it back
 		return channel.queryBlockByHash(Buffer.from('dummy'));
 	}, (err) => {
 		t.fail('Failed to enroll user: ' + err.stack ? err.stack : err);
@@ -346,9 +408,9 @@ test('  ---->>>>> Query Installed Chaincodes working <<<<<-----', (t) => {
 				', version: ' + response.chaincodes[i].version +
 				', path: ' + response.chaincodes[i].path);
 
-			if (response.chaincodes[i].name === e2e.chaincodeId
-				&& response.chaincodes[i].version === e2e.chaincodeVersion
-				&& response.chaincodes[i].path === testUtil.CHAINCODE_PATH) {
+			if (response.chaincodes[i].name === e2e.chaincodeId &&
+				response.chaincodes[i].version === e2e.chaincodeVersion &&
+				response.chaincodes[i].path === testUtil.CHAINCODE_PATH) {
 				found = true;
 			}
 		}
@@ -391,9 +453,9 @@ test('  ---->>>>> Query Instantiated Chaincodes working <<<<<-----', (t) => {
 				', version: ' + response.chaincodes[i].version +
 				', path: ' + response.chaincodes[i].path);
 
-			if (response.chaincodes[i].name === e2e.chaincodeId
-				&& response.chaincodes[i].version === 'v1'
-				&& response.chaincodes[i].path === testUtil.CHAINCODE_UPGRADE_PATH) {
+			if (response.chaincodes[i].name === e2e.chaincodeId &&
+				response.chaincodes[i].version === 'v1' &&
+				response.chaincodes[i].path === testUtil.CHAINCODE_UPGRADE_PATH) {
 				found = true;
 			}
 		}

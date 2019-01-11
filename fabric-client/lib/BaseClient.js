@@ -6,7 +6,7 @@
 
 'use strict';
 
-var sdkUtils = require('./utils.js');
+const sdkUtils = require('./utils.js');
 
 /**
  * Base class for a client that can use a {@link CryptoSuite} to sign and hash.
@@ -15,7 +15,7 @@ var sdkUtils = require('./utils.js');
  *
  * @class
  */
-var BaseClient = class {
+const BaseClient = class {
 	constructor() {
 		this._cryptoSuite = null;
 	}
@@ -49,7 +49,7 @@ var BaseClient = class {
 	 *
 	 * <br><br><code>cryptosuite.setCryptoKeyStore(Client.newCryptoKeyStore(KVSImplClass, opts))</code>
 	 *
-	 * @param {function} KVSImplClass Optional. The built-in key store saves private keys. The key store may be backed by different
+	 * @param {api.KeyValueStore} KVSImplClass Optional. The built-in key store saves private keys. The key store may be backed by different
 	 * {@link KeyValueStore} implementations. If specified, the value of the argument must point to a module implementing the
 	 * KeyValueStore interface.
 	 * @param {Object} opts Implementation-specific option object used in the constructor
@@ -91,7 +91,7 @@ var BaseClient = class {
 	 * string interpolation methods like [util.format]{@link https://nodejs.org/api/util.html#util_util_format_format}.
 	 */
 	static setLogger(logger) {
-		var err = '';
+		let err = '';
 
 		if (typeof logger.debug !== 'function') {
 			err += 'debug() ';
@@ -105,7 +105,7 @@ var BaseClient = class {
 			err += 'warn() ';
 		}
 
-		if (typeof logger.error !== 'function' ) {
+		if (typeof logger.error !== 'function') {
 			err += 'error()';
 		}
 
@@ -143,6 +143,11 @@ var BaseClient = class {
 
 		return sdkUtils.getConfigSetting(name, default_value);
 	}
+	// make available from the client instance
+	getConfigSetting(name, default_value) {
+
+		return BaseClient.getConfigSetting(name, default_value);
+	}
 
 	/**
 	 * Adds a file to the top of the list of configuration setting files that are
@@ -169,8 +174,26 @@ var BaseClient = class {
 	 * @param {Object} value - The value of a setting
 	 */
 	static setConfigSetting(name, value) {
-
 		sdkUtils.setConfigSetting(name, value);
+	}
+	// make available from the client instance
+	setConfigSetting(name, value) {
+		BaseClient.setConfigSetting(name, value);
+	}
+
+
+	/**
+	 * Use this method to get a logger that will add entries to the same location
+	 * being used by the Hyperledger Fabric client.
+	 *
+	 * @param {string} name - The name of the label to be added to the log entries.
+	 *        To help identify the source of the log entry.
+	 * @returns {Logger} The logger that may be used to log entires with
+	 *         'info()', 'warn()', 'error()' and 'debug()' methods to mark the
+	 *         the type of the log entries.
+	 */
+	static getLogger(name) {
+		return sdkUtils.getLogger(name);
 	}
 
 	/**
@@ -207,7 +230,7 @@ var BaseClient = class {
 	 * with x509 parsers.
 	 * Will remove or add required linefeeds and carriage returns.
 	 *
-	 * @param {string} raw - a string that contains a X509 certiicate
+	 * @param {string} raw - a string that contains a X509 certificate
 	 * @throws {Error} An error indicating that the begining and end parts are
 	 *         not correct.
 	 */

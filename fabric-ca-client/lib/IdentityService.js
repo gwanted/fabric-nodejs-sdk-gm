@@ -1,22 +1,12 @@
 /*
  Copyright 2018 IBM All Rights Reserved.
 
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
+ SPDX-License-Identifier: Apache-2.0
 
-	  http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
 */
 
 'use strict';
 
-const logger = require('./utils').getLogger('IdentityService');
 const checkRegistrar = require('./helper').checkRegistrar;
 
 /**
@@ -115,27 +105,26 @@ class IdentityService {
 	 * @return {Promise} Return the secret of this new identity
 	 */
 	create(req, registrar) {
-		if (typeof req === 'undefined' || req === null) {
+		if (!req) {
 			throw new Error('Missing required argument "req"');
 		}
 
 		if (!req.enrollmentID || !req.affiliation) {
-			throw new Error('Missing required parameters.  "req.enrollmentID", "req.affiliation" are all required.');
+			throw new Error('Missing required parameters. "req.enrollmentID", "req.affiliation" are all required.');
 		}
+
 		checkRegistrar(registrar);
+
 		// set default maxEnrollments to 1
 		let maxEnrollments = 1;
 		if (Number.isInteger(req.maxEnrollments)) {
 			maxEnrollments = req.maxEnrollments;
 		}
 
-		let self = this;
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const self = this;
+		const signingIdentity = registrar.getSigningIdentity();
 
-		return new Promise(function (resolve, reject) {
+		return new Promise((resolve, reject) => {
 			const request = {
 				id: req.enrollmentID,
 				type: req.type || null,
@@ -147,9 +136,9 @@ class IdentityService {
 			};
 
 			return self.client.post('identities', request, signingIdentity)
-				.then(function (response) {
+				.then((response) => {
 					return resolve(response.result.secret);
-				}).catch(function (err) {
+				}).catch((err) => {
 					return reject(err);
 				});
 		});
@@ -167,13 +156,9 @@ class IdentityService {
 			throw new Error('Missing required argument "enrollmentID", or argument "enrollmentID" is not a valid string');
 		}
 		checkRegistrar(registrar);
+		const signingIdentity = registrar.getSigningIdentity();
 
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
-
-		const url = 'identities/' + enrollmentID;
+		const url = 'identities/' + enrollmentID + '?ca=' + this.client._caName;
 		return this.client.get(url, signingIdentity);
 	}
 
@@ -186,12 +171,9 @@ class IdentityService {
 	getAll(registrar) {
 		checkRegistrar(registrar);
 
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const signingIdentity = registrar.getSigningIdentity();
 
-		return this.client.get('identities', signingIdentity);
+		return this.client.get('identities?ca=' + this.client._caName, signingIdentity);
 	}
 
 	/**
@@ -199,20 +181,21 @@ class IdentityService {
 	 *
 	 * @param {string} enrollmentID
 	 * @param {User} registrar
+	 * @param {boolean} force - Optional. With force, some identity can delete itself
 	 * @return {Promise} {@link ServiceResponse}
 	 */
-	delete(enrollmentID, registrar) {
+	delete(enrollmentID, registrar, force) {
 		if (!enrollmentID || typeof enrollmentID !== 'string') {
 			throw new Error('Missing required argument "enrollmentID", or argument "enrollmentID" is not a valid string');
 		}
 		checkRegistrar(registrar);
 
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const signingIdentity = registrar.getSigningIdentity();
 
-		const url = 'identities/' + enrollmentID;
+		let url = 'identities/' + enrollmentID;
+		if (force === true) {
+			url = url + '?force=true';
+		}
 		return this.client.delete(url, signingIdentity);
 	}
 
@@ -229,29 +212,27 @@ class IdentityService {
 			throw new Error('Missing required argument "enrollmentID", or argument "enrollmentID" is not a valid string');
 		}
 		checkRegistrar(registrar);
-		let signingIdentity = registrar.getSigningIdentity();
-		if (!signingIdentity) {
-			throw new Error('Can not get signingIdentity from registrar');
-		}
+		const signingIdentity = registrar.getSigningIdentity();
+
 		const url = 'identities/' + enrollmentID;
 
-		let request = {};
-		if(req.type) {
+		const request = {};
+		if (req.type) {
 			request.type = req.type;
 		}
-		if(req.affiliation) {
+		if (req.affiliation) {
 			request.affiliation = req.affiliation;
 		}
 		if (Number.isInteger(req.maxEnrollments)) {
 			request.maxEnrollments = req.maxEnrollments;
 		}
-		if(req.attrs) {
+		if (req.attrs) {
 			request.attrs = req.attrs;
 		}
-		if(req.enrollmentSecret) {
+		if (req.enrollmentSecret) {
 			request.secret = req.enrollmentSecret;
 		}
-		if(req.caname) {
+		if (req.caname) {
 			request.caname = req.caname;
 		}
 

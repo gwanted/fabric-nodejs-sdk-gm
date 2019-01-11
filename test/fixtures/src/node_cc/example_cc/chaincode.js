@@ -19,19 +19,19 @@ limitations under the License.
 const shim = require('fabric-shim');
 
 // An log4js logger instance
-var logger = shim.newLogger('example_cc0');
+const logger = shim.newLogger('example_cc0');
 // The logger level can also be set by environment variable 'CORE_CHAINCODE_LOGGING_SHIM'
 // to CRITICAL, ERROR, WARNING, DEBUG
 logger.level = 'info';
 
-var Chaincode = class {
+const Chaincode = class {
 	async Init(stub) {
 		logger.info('########### example_cc0 Init ###########');
-		let ret = stub.getFunctionAndParameters();
+		const ret = stub.getFunctionAndParameters();
 
 		let A, B;    // Entities
 		let Aval, Bval; // Asset holdings
-		let args = ret.params;
+		const args = ret.params;
 
 		if (args.length === 4) {
 			A = args[0];
@@ -63,20 +63,40 @@ var Chaincode = class {
 
 	async Invoke(stub) {
 		logger.info('########### example_cc0 Invoke ###########');
-		let ret = stub.getFunctionAndParameters();
-		let fcn = ret.fcn;
-		let args = ret.params;
+		const ret = stub.getFunctionAndParameters();
+		const fcn = ret.fcn;
+		const args = ret.params;
 
-		if (fcn === 'delete') {
-			return this.delete(stub, args);
-		}
+		try {
+			if (fcn === 'delete') {
+				return this.delete(stub, args);
+			}
 
-		if (fcn === 'query') {
-			return this.query(stub, args);
-		}
+			if (fcn === 'query') {
+				return this.query(stub, args);
+			}
 
-		if (fcn === 'move') {
-			return this.move(stub, args);
+			if (fcn === 'throwError') {
+				return this.throwError(stub, args);
+			}
+
+			if (fcn === 'move') {
+				return this.move(stub, args);
+			}
+
+			if (fcn === 'call') {
+				return this.call(stub, args);
+			}
+
+			if (fcn === 'getTransient') {
+				return this.getTransient(stub, args);
+			}
+
+			if (fcn === 'echo') {
+				return this.echo(stub, args);
+			}
+		} catch (error) {
+			return shim.error(error.toString());
 		}
 
 		logger.Errorf(`Unknown action, check the first argument, must be one of 'delete', 'query', or 'move'. But got: ${fcn}`);
@@ -84,19 +104,20 @@ var Chaincode = class {
 	}
 
 	async move(stub, args) {
-		let A, B;
-		let Aval, Bval;
-		let X;
+		logger.info('########### example_cc0 move ###########');
 
-		if (args.length != 3) {
+		let Aval, Bval;
+
+
+		if (args.length !== 3) {
 			return shim.error('Incorrect number of arguments. Expecting 4, function followed by 2 names and 1 value');
 		}
 
-		A = args[0];
-		B = args[1];
+		const A = args[0];
+		const B = args[1];
 
 		try {
-			let Avalbytes = await stub.getState(A);
+			const Avalbytes = await stub.getState(A);
 			if (!Avalbytes) {
 				return shim.error('Entity A not found');
 			}
@@ -107,7 +128,7 @@ var Chaincode = class {
 		}
 
 		try {
-			let Bvalbytes = await stub.getState(B);
+			const Bvalbytes = await stub.getState(B);
 			if (!Bvalbytes) {
 				return shim.error('Entity B not found');
 			}
@@ -117,7 +138,7 @@ var Chaincode = class {
 			return shim.error('Failed to get state B');
 		}
 		// Perform the execution
-		X = parseInt(args[2]);
+		const X = parseInt(args[2]);
 		if (isNaN(X)) {
 			return shim.error('Invalid transaction amount, expecting a integer value');
 		}
@@ -129,6 +150,7 @@ var Chaincode = class {
 		try {
 			await stub.putState(A, Buffer.from(Aval.toString()));
 			await stub.putState(B, Buffer.from(Bval.toString()));
+			logger.info(' example_cc0 - move succeed');
 			return shim.success(Buffer.from('move succeed'));
 		} catch (e) {
 			return shim.error(e);
@@ -137,11 +159,13 @@ var Chaincode = class {
 	}
 
 	async delete(stub, args) {
-		if (args.length != 1) {
+		logger.info('########### example_cc0 delete ###########');
+
+		if (args.length !== 1) {
 			return shim.error('Incorrect number of arguments. Expecting 1');
 		}
 
-		let A = args[0];
+		const A = args[0];
 
 		try {
 			await stub.deleteState(A);
@@ -153,15 +177,17 @@ var Chaincode = class {
 	}
 
 	async query(stub, args) {
-		if (args.length != 1) {
+		logger.info('########### example_cc0 query ###########');
+
+		if (args.length !== 1) {
 			return shim.error('Incorrect number of arguments. Expecting name of the person to query');
 		}
 
-		let A = args[0];
+		const A = args[0];
 		let Aval;
 		// Get the state from the ledger
 		try {
-			let Avalbytes = await stub.getState(A);
+			const Avalbytes = await stub.getState(A);
 			if (!Avalbytes) {
 				return shim.error('Entity A not found');
 			}
@@ -170,13 +196,62 @@ var Chaincode = class {
 			return shim.error('Failed to get state A');
 		}
 
-		let jsonResp = {
+		const jsonResp = {
 			Name: A,
 			Amount: Aval
 		};
 		logger.info('Query Response:%s\n', JSON.stringify(jsonResp));
 
 		return shim.success(Buffer.from(Aval.toString()));
+	}
+
+	async throwError(stub, args) {
+		return shim.error(new Error('throwError: an error occurred'));
+	}
+
+	async call(stub, args) {
+		logger.info('########### example_cc0 call ###########');
+
+		if (args.length < 2) {
+			return shim.error('Incorrect number of arguments. Expecting name of the chaincode and function to call');
+		}
+
+		const chaincode_name = args.shift().toString();
+
+		logger.info('Calling chaincode:%s with function:%s  argument 1:%s \n', chaincode_name, args[0].toString(), parseInt(args[1]));
+
+		let results = null;
+		// call the other chaincode
+		try {
+			results = await stub.invokeChaincode(chaincode_name, args);
+			logger.info(' example_cc0 - call succeeded %s', results);
+		} catch (e) {
+			logger.error('Failed to call chaincode ' + e);
+		}
+
+		if (results) {
+			return shim.success(Buffer.from('Success'));
+		}
+
+		return shim.error('Failed to complete the call to ' + chaincode_name);
+	}
+
+	async getTransient(stub) {
+		const transientMap = stub.getTransient();
+		const result = {};
+		transientMap.forEach((value, key) => {
+			result[key] = value.toString('utf8');
+		});
+		const payload = Buffer.from(JSON.stringify(result));
+		return shim.success(payload);
+	}
+
+	async echo(stub, args) {
+		if (args.length > 0) {
+			return shim.success(Buffer.from(args[0]));
+		} else {
+			return shim.success();
+		}
 	}
 };
 

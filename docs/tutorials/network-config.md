@@ -26,7 +26,7 @@ A connection profile contain entries that describe the Hyperledger Fabric networ
 * `Client.loadFromConfig()` - A static utility method to get a fabric client instance loaded with the connection profile configuration.
 * `client.loadFromConfig()` - A fabric client instance method to load a connection profile configuration, overriding any existing connection profile configuration settings that may have been set when this client object was created by the call above.
 
-#### new API's that use a loaded connetion profile
+#### new API's that use a loaded connection profile
 * `client.initCredentialStores()` - A fabric client instance method to create a state store and assign it to the fabric client instance based on the current settings in the loaded connection profile configuration. It will also create the crypto suite and assign it to the fabric client instance. A crypto store will be created and assigned to crypto suite if needed. (HSM based crypto suites do not require a crypto store).
 * `client.setTlsClientCertAndKey(clientCert, clientKey)` -A fabric client instance method that will set a certificate and the corresponding private key on the client instance. Mutual TLS client settings are not stored within the connection profile. When a peer or orderer instance is created for the user from the endpoints defined in the connection profile, these settings will be used as the client mutual TLS settings. When using mutual TLS and a connection profile, this method must be called before endpoints are required. Calling this method is only required when using mutual TLS and a connection profile.
 * `channel.newChannelEventHub()` - A fabric channel instance method to create an channel-based event hub based on the current settings in the loaded connection profile configuration of the named peer.
@@ -100,14 +100,13 @@ orderers:
     url: grpcs://localhost:7050
     grpcOptions:
       ssl-target-name-override: orderer.example.com
-      grpc-max-send-message-length: 15
+      grpc-max-send-message-length: 4194304
     tlsCACerts:
       path: test/fixtures/channel/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tlscacerts/example.com-cert.pem
 
 peers:
   peer0.org1.example.com:
     url: grpcs://localhost:7051
-    eventUrl: grpcs://localhost:7053
     grpcOptions:
       ssl-target-name-override: peer0.org1.example.com
       grpc.keepalive_time_ms: 600000
@@ -116,7 +115,6 @@ peers:
 
   peer0.org2.example.com:
     url: grpcs://localhost:8051
-    eventUrl: grpcs://localhost:8053
     grpcOptions:
       ssl-target-name-override: peer0.org2.example.com
     tlsCACerts:
@@ -146,7 +144,15 @@ certificateAuthorities:
     caName: caorg2
 ```
 
-The following example will have an existing fabric client load a connection profile configuration. The definition will only contain client side definitions and no fabric network definitions. Calling for a load on an existing fabric client does an overlay of the top level sections in the file being loaded replacing the sections on those previously loaded. In this case the file being loaded only has a client section, therefore the loaded definition will now have the perviously loaded channels, organizations, peers, orderers, and certificateAuthorities section definitions and the newly loaded client section definition. This allows for an existing fabric client to be able to work within different organization.
+The following example will have an existing fabric client load a connection profile configuration. The definition will only contain client side definitions and no fabric network definitions. The client may load a new profile at anytime, it will overlay the top level sections it contains of those previously loaded. In this case the file being loaded only has a client section, therefore the loaded definition will now have the previously loaded channels, organizations, peers, orderers, and certificateAuthorities section definitions and the newly loaded client section definition. This allows for an existing fabric client to be able to work within different organization. 
+Notice this client definition contains a `connection` section with an `options` attribute in the
+client section. Settings defined here will be applied to new peer and orderer
+instances the client creates.
+This will include peers and orderers that will be created automatically when
+using the discovery service.
+Peers and Orderers may override these connection settings in their `grpcOptions` settings.
+
+Note: The fabric-client `grpc-max-send-message-length` and `grpc-max-receive-message-length` defaults are -1 (unlimited).
 ```
 client.loadFromConfig('test/fixtures/org1.yaml');
 ```
@@ -161,6 +167,9 @@ client:
     path: "/tmp/hfc-kvs/org1"
     cryptoStore:
       path: "/tmp/hfc-cvs/org1"
+  connection:
+    options
+      grpc.keepalive_time_ms: 120000
 ```
 
 ### Setup the stores
@@ -188,13 +197,13 @@ var fabric_ca_client = client.getCertificateAuthority();
 ```
 Then once we have a fabric-ca-client, we will be able to register new users. We could also use the fabric-ca-client to enroll users and make a few calls to the fabric client to create a user object and then assign that user object to the fabric client, but it will be much easier to just use the convenience method of the fabric client instance. Notice how we have to use the 'admin' user object returned from the client.setUserContext() to do the register. The admin user object has the credentials needed to the register. Then notice we called the same setUserContext method as we did with the admin above, this will have the fabric client object assigned with the 'user1' user context thus providing the credentials to interact with the fabric network. Note that the setUserContext also stores the user context which contains the signed certificate from the certificate authority and newly created public and private keys of the now enrolled user.
 ```
-ca.fabric_ca_client({enrollmentID: 'user1', affiliation: 'org1'}, admin)
+fabric_ca_client.register({enrollmentID: 'user1', affiliation: 'org1'}, admin)
 .then((secret) => {
 	return client.setUserContext({username:'user1', password:secret});
 }).then((user)=> {
 ```
 ### Work with mutual TLS
-When your network configuration includes mutual TLS, the client certificate and private key must be available to the client instance before the endpoints are automatically built. The client instance will be able to pass the required material to the endpoint instance that is needed to establish the connection. The example shown will also retrieve the material. These steps must be performed before any actions on the fabric network.
+When your network is using mutual TLS, the client certificate and private key must be available to the client instance before the endpoints are automatically built. The client instance will be able to pass the required material to the endpoint instance that is needed to establish the connection. The example shown will also retrieve the material. These steps must be performed before any actions on the fabric network.
 ```
 // get the CA associated with this client's organization
 let fabric_ca_client = client.getCertificateAuthority();
@@ -223,7 +232,7 @@ Notice in the organizations section of the connection profile configuration that
 client.setAdminSigningIdentity('admin privateKey','admin cert');
 ```
 
-Assume that connection profile configurations have been loaded, setting up both an organization with an admin and indicating that the client is in that organization. Then when the call is made to get a transaction id object, the fabric client will check to see if an admin has been assigned to the fabric client and use that to generate the transaction id. The transaction id returned will be tagged that it was generated with the assigned administrative identity. Notice how the request object being built is using just a name for the orderer rather than a `Orderer` object. The fabric client will look up this name in the loaded connection profile configuration. When the `createChannel` call is made, the fabric client will know that this action should be signed by the administrative identity because the transaction id was marked as an admin based transaction. Note that the administrative signing identity is not required if the logged in user is an administrative user and has been assigned to the fabric client.  
+Assume that a common connection profile has been loaded, setting up both an organization with an admin and indicating that the client is in that organization. Then when the call is made to get a transaction id object, the fabric client will check to see if an admin has been assigned to the fabric client and use that to generate the transaction id. The transaction id returned will be tagged that it was generated with the assigned administrative identity. Notice how the request object being built is using just a name for the orderer rather than an `Orderer` object. The fabric client will look up this name in the loaded connection profile configuration. When the `createChannel` call is made, the fabric client will know that this action should be signed by the administrative identity because the transaction id was marked as an admin based transaction. Note that the administrative signing identity is not required if the logged in user is an administrative user and has been assigned to the fabric client.  
 ```
 let tx_id = client.newTransactionID(true);
 
@@ -267,9 +276,9 @@ peer0.org2.example.com:
 ```
 Notice that we have left off the targets parameter of the request object. This will have the fabric client do a lookup of peers on this channel in the connection profile configuration. The fabric client will be looking for peers defined in the role of `endorsingPeer`. The fabric client will then send the proposal to the located peers and return all the endorsements in the `results` object.
 
-There may be a need to have only the peers in a specific organization.
+There may be a need to have only the peers in a specific organization. Use the mspid of the organization.
 ```
-var peers = getPeersForOrg('Org1');
+var peers = getPeersForOrg('Org1MSP');
 ```
 Or maybe for the organization that is defined in the client section of the connection profile.
 ```
@@ -293,20 +302,20 @@ When there is a connection profile configuration loaded and the query call is no
 * These are fabric client based queries and require the user have an admin role or indicate that the admin identity should be used. These queries do not use the connection profile config lookup to find a peer to use and must be passed the target peer.
   - queryChannels
   - queryInstalledChaincodes
-* These queries are channel based queries that require a peer with the ledgerQuery role.
+* These queries are channel based queries that require a peer with the `ledgerQuery` role.
   - queryInstantiatedChaincodes (user must be an admin or indicate that the assigned admin identity should be used)
   - queryInfo
   - queryBlockByHash
   - queryBlock
   - queryTransaction
-* this is a channel based query and requires a peer with the chaincodeQuery role.
+* this is a channel based query and requires a peer with the `chaincodeQuery` role.
   - queryByChaincode
 
 
 ### When monitoring for events
 Working with an channel-based event hub will not changed when a connection profile configuration has been loaded. A new method has been added to the fabric client to simplify setting up of an ChannelEventHub object. Use the following to get an ChannelEventHub object that will be setup to work with the named peer's channel-based event hub.
 ```
-var chanel_event_hub = channel.newChannelEventHub('peer0.org1.example.com');
+var channel_event_hub = channel.newChannelEventHub('peer0.org1.example.com');
 ```
 Notice how the parameter to the call is the name of the peer. All settings to create an channel-based event hub are defined by the connection profile configuration under the peer by that name.
 ```
@@ -318,13 +327,246 @@ peer0.org1.example.com:
   tlsCACerts:
 	path: test/fixtures/channel/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tlscacerts/org1.example.com-cert.pem
 ```
-The following will be a list of event hubs that are within the 'Org1' organization. All peers referenced by an organization that the 'eventSource' set to true.
+The following will be a list of event hubs that are within the 'Org1' organization.
+All peers referenced by an organization that the 'eventSource' set to true.
+Use the mspid of the organization.
 ```
-var channel_event_hubs = channel.getChannelEventHubsForOrg('Org1');
+var channel_event_hubs = channel.getChannelEventHubsForOrg('Org1MSP');
 ```
 
 The following will be a list of channel-based event hubs that are within the organization defined in the client section of the connection profile.
 ```
 var channel_event_hubs = channel.getChannelEventHubsForOrg();
 ```
+
+## What does the Fabric Client look for in a common connection profile
+The Fabric Client will be looking for the following key names and parameters for those keys:
+
+```
+#
+# Schema version of the content. Used by the SDK to apply the parsing rules.
+#
+version: "1.0" # only supported version as of fabric-client v1.3.0
+
+#
+# The client section is SDK-specific. These are the settings that the
+# NodeSDK will use to automatically set up a Client instance.
+#
+client:
+  # Which organization does this application instance belong to? The value must be the name of an org
+  # defined under "organizations" ... see below
+  organization: Org1
+
+  # Some SDKs support pluggable KV stores, the properties under "credentialStore"
+  # are implementation specific
+  credentialStore:
+    # Specific to FileKeyValueStore.js or similar implementations in other SDKs. Can be others
+    # if using an alternative impl. For instance, CouchDBKeyValueStore.js would require an object
+    # here for properties like url, db name, etc.
+    path: "/tmp/hfc-kvs"
+      or
+    <implementation specific properties>
+
+    # Specific to the CryptoSuite implementation. Software-based implementations like
+    # CryptoSuite_ECDSA_AES.js in node SDK requires a key store. PKCS#11 based implementations does
+    # not.
+    cryptoStore:
+      # Specific to the underlying KeyValueStore that backs the crypto key store.
+      path: "/tmp/hfc-cvs"
+       or
+    <implementation specific properties>
+
+  # Sets the connection timeouts for new peer and orderer objects when the client creates
+  # peer and orderer objects during the client.getPeer() and client.getOrderer() calls
+  # or when the peer and orderer objects are created automatically when a channel
+  # is created by the client.getChannel() call.
+  connection:
+    timeout:
+       peer:
+         # the timeout in seconds to be used on requests to a peer,
+         # for example 'sendTransactionProposal'
+         endorser: 120
+         # the timeout in seconds to be used by applications when waiting for an
+         # event to occur. This time should be used in a javascript timer object
+         # that will cancel the event registration with the channel event hub instance.
+         eventHub: 60
+         # the timeout in seconds to be used when setting up the connection
+         # with a peer event hub. If the peer does not acknowledge the
+         # connection within the time, the application will be notified over the
+         # error callback if provided.
+         eventReg: 3
+       # the timeout in seconds to be used on request to the orderer,
+       # for example
+       orderer: 30
+
+#
+# How a channel is defined and the peers and orderers on that channel. When the
+# client.getChannel() call is used the client will pre-populate the channel with
+# orderers and peers as defined in this section.
+#
+channels:
+  # name of the channel
+  mychannel2:
+    # List of orderers designated by the application to use for transactions on this channel.
+    # The values must be orderer names defined under "orderers" section
+    orderers:
+      - orderer.example.com
+
+    # List of peers from participating organizations
+    peers:
+      # The values must be peer names defined under "peers" section
+      peer0.org1.example.com:
+        # Will this peer be sent transaction proposals for endorsement? The peer must
+        # have the chaincode installed. The app can also use this property to decide which peers
+        # to send the chaincode install request. Default: true
+        endorsingPeer: true
+
+        # Will this peer be sent query proposals? The peer must have the chaincode
+        # installed. The app can also use this property to decide which peers to send the
+        # chaincode install request. Default: true
+        chaincodeQuery: true
+
+        # Will this peer be sent query proposals that do not require chaincodes, like
+        # queryBlock(), queryTransaction(), etc. Default: true
+        ledgerQuery: true
+
+        # Will this peer be the target of a SDK listener registration? All peers can
+        # produce events but the app typically only needs to connect to one to listen to events.
+        # Default: true
+        eventSource: true
+
+        # Will this peer be the target of Discovery requests.
+        # Default: true
+        discover: true
+
+#
+# list of participating organizations in this network
+#
+organizations:
+  Org1:
+    mspid: Org1MSP
+
+    # The peers that are known to be in this organization
+    peers:
+      - peer0.org1.example.com
+
+    # Certificate Authorities issue certificates for identification purposes in a Fabric based
+    # network. Typically certificates provisioning is done in a separate process outside of the
+    # runtime network. Fabric-CA is a special certificate authority that provides a REST APIs for
+    # dynamic certificate management (enroll, revoke, re-enroll). The following section is only for
+    # Fabric-CA servers.
+    certificateAuthorities:
+      - ca-org1
+
+    # If the application is going to make requests that are reserved to organization
+    # administrators, including creating/updating channels, installing/instantiating chaincodes, it
+    # must have access to the admin identity represented by the private key and signing certificate.
+    # Both properties can be the PEM string or local path to the PEM file.
+	#   path: <the path to a file containing the byte string>
+	#    or
+	#   pem: <the byte string>
+	# Note that this is mainly for convenience in development mode, production systems
+	# should not expose sensitive information this way.
+	# The SDK should allow applications to set the org admin identity via APIs, and only use
+    # this route as an alternative when it exists.
+    adminPrivateKey:
+      path: <path to file>
+       or
+      pem: <byte string>
+    signedCert:
+      path: <path to file>
+       or
+      pem: <byte string>
+
+  # the profile will contain public information about organizations other than the one it belongs to.
+  # These are necessary information to make transaction lifecycles work, including MSP IDs and
+  # peers with a public URL to send transaction proposals. The file will not contain private
+  # information reserved for members of the organization, such as admin key and certificate,
+  # fabric-ca registrar enroll ID and secret, etc.
+  Org2:
+    mspid: Org2MSP
+    peers:
+      - peer0.org2.example.com
+    certificateAuthorities:
+      - ca-org2
+    adminPrivateKey:
+      path: <path to file>
+       or
+      pem: <byte string>
+    signedCert:
+      path: <path to file>
+       or
+      pem: <byte string>
+
+#
+# List of orderers to send transaction and channel create/update requests.
+#
+orderers:
+  orderer.example.com:
+    url: grpcs://localhost:7050
+
+    # these are standard properties defined by the gRPC library
+    # they will be passed in as-is to gRPC client constructor
+    grpcOptions:
+      ssl-target-name-override: orderer.example.com
+
+    tlsCACerts:
+      path: <path to file>
+       or
+      pem: <byte string>
+
+#
+# List of peers to send various requests to, including endorsement, query
+# and event listener registration.
+#
+peers:
+  peer0.org1.example.com:
+    # this URL is used to send endorsement and query requests
+    url: grpcs://localhost:7051
+
+    grpcOptions:
+      ssl-target-name-override: peer0.org1.example.com
+      request-timeout: 120001
+
+    tlsCACerts:
+      path: <path to file>
+       or
+      pem: <byte string>
+
+  peer0.org2.example.com:
+    url: grpcs://localhost:8051
+    grpcOptions:
+      ssl-target-name-override: peer0.org2.example.com
+    tlsCACerts:
+      path: <path to file>
+       or
+      pem: <byte string>
+
+#
+# Fabric-CA is a special kind of Certificate Authority provided by Hyperledger Fabric which allows
+# certificate management to be done via REST APIs. Application may choose to use a standard
+# Certificate Authority instead of Fabric-CA, in which case this section would not be specified.
+#
+certificateAuthorities:
+  ca-org1:
+    url: https://localhost:7054
+    # the properties specified under this object are passed to the 'http' client verbatim when
+    # making the request to the Fabric-CA server
+    httpOptions:
+      verify: false
+    tlsCACerts:
+      path: <path to file>
+        or
+      pem: <byte string>
+
+    # Fabric-CA supports dynamic user enrollment via REST APIs. A "root" user, a.k.a registrar, is
+    # needed to enroll and invoke new users.
+    registrar:
+      - enrollId: admin
+        enrollSecret: adminpw
+    # The optional name of the CA.
+    caName: ca-org1
+```
+
+
 <a rel="license" href="http://creativecommons.org/licenses/by/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International License</a>.

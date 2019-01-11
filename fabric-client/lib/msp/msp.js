@@ -5,16 +5,16 @@
 */
 'use strict';
 
-var api = require('../api.js');
-var idModule = require('./identity.js');
-var Identity = idModule.Identity;
-var SigningIdentity = idModule.SigningIdentity;
-var utils = require('../utils.js');
-var logger = utils.getLogger('msp.js');
+const api = require('../api.js');
+const idModule = require('./identity.js');
+const Identity = idModule.Identity;
+const SigningIdentity = idModule.SigningIdentity;
+const utils = require('../utils.js');
+const logger = utils.getLogger('msp.js');
 
-var grpc = require('grpc');
-var identityProto = grpc.load(__dirname + '/../protos/msp/identities.proto').msp;
-var _mspConfigProto = grpc.load(__dirname + '/../protos/msp/msp_config.proto').msp;
+const ProtoLoader = require('../ProtoLoader');
+const identityProto = ProtoLoader.load(__dirname + '/../protos/msp/identities.proto').msp;
+const _mspConfigProto = ProtoLoader.load(__dirname + '/../protos/msp/msp_config.proto').msp;
 
 
 /**
@@ -24,7 +24,7 @@ var _mspConfigProto = grpc.load(__dirname + '/../protos/msp/msp_config.proto').m
  * and PKIs (software-managed or HSM based)
  * @class
  */
-var MSP = class {
+const MSP = class {
 	/**
 	 * Setup the MSP instance according to configuration information
 	 * @param {Object} config A configuration object specific to the implementation. For this
@@ -41,15 +41,15 @@ var MSP = class {
 	 */
 	constructor(config) {
 		logger.debug('const - start');
-		if (!config)
+		if (!config) {
 			throw new Error('Missing required parameter "config"');
-
-		if (!config.id)
+		}
+		if (!config.id) {
 			throw new Error('Parameter "config" missing required field "id"');
-
-		if (!config.cryptoSuite)
+		}
+		if (!config.cryptoSuite) {
 			throw new Error('Parameter "config" missing required field "cryptoSuite"');
-
+		}
 		if (typeof config.signer !== 'undefined') {
 			// when constructing local msp, a signer property is required and it must be an instance of SigningIdentity
 			if (!(SigningIdentity.isInstance(config.signer))) {
@@ -113,25 +113,25 @@ var MSP = class {
 	 * Returns the Protobuf representation of this MSP Config
 	 */
 	toProtobuf() {
-		var proto_msp_config = new _mspConfigProto.MSPConfig();
-		proto_msp_config.setType(0); //FABRIC
-		var proto_fabric_msp_config = new _mspConfigProto.FabricMSPConfig();
+		const proto_msp_config = new _mspConfigProto.MSPConfig();
+		proto_msp_config.setType(0); // FABRIC
+		const proto_fabric_msp_config = new _mspConfigProto.FabricMSPConfig();
 		proto_fabric_msp_config.setName(this._id);
 		proto_fabric_msp_config.setRootCerts(this._rootCerts);
-		if(this._intermediateCerts) {
+		if (this._intermediateCerts) {
 			proto_fabric_msp_config.setIntermediateCerts(this._intermediateCerts);
 		}
-		if(this._admins) {
+		if (this._admins) {
 			proto_fabric_msp_config.setAdmins(this._admins);
 		}
-		if(this._organization_units) {
-			//organizational_unit_identifiers
+		if (this._organization_units) {
+			// organizational_unit_identifiers
 			proto_fabric_msp_config.setOrganizationalUnitIdentifiers(this._organization_units);
 		}
-		if(this._tls_root_certs) {
+		if (this._tls_root_certs) {
 			proto_fabric_msp_config.setTlsRootCerts(this._tls_root_certs);
 		}
-		if(this._tls_intermediate_certs) {
+		if (this._tls_intermediate_certs) {
 			proto_fabric_msp_config.getTlsIntermediateCerts(this._tls_intermediate_certs);
 		}
 		proto_msp_config.setConfig(proto_fabric_msp_config.toBuffer());
@@ -149,26 +149,24 @@ var MSP = class {
 	 */
 	deserializeIdentity(serializedIdentity, storeKey) {
 		logger.debug('importKey - start');
-		var store_key = true; //default
+		let store_key = true; // default
 		// if storing is not required and therefore a promise will not be returned
 		// then storeKey must be set to false;
-		if(typeof storeKey === 'boolean') {
+		if (typeof storeKey === 'boolean') {
 			store_key = storeKey;
 		}
-		var sid = identityProto.SerializedIdentity.decode(serializedIdentity);
-		var cert = sid.getIdBytes().toBinary();
+		const sid = identityProto.SerializedIdentity.decode(serializedIdentity);
+		const cert = sid.getIdBytes().toBinary();
 		logger.debug('Encoded cert from deserialized identity: %s', cert);
-		if(!store_key) {
-			console.log("caocaocao112")
-			var publicKey =this.cryptoSuite.importKey(cert, { algorithm: api.CryptoAlgorithms.X509Certificate, ephemeral: true });
-			var sdk_identity = new Identity(cert, publicKey, this.getId(), this.cryptoSuite);
+		if (!store_key) {
+			const publicKey = this.cryptoSuite.importKey(cert, {algorithm: api.CryptoAlgorithms.X509Certificate, ephemeral: true});
+			const sdk_identity = new Identity(cert, publicKey, this.getId(), this.cryptoSuite);
 			return sdk_identity;
-		}
-		else {
-			return this.cryptoSuite.importKey(cert, { algorithm: api.CryptoAlgorithms.X509Certificate })
-			.then((publicKey) => {
-				return new Identity(cert, publicKey, this.getId(), this.cryptoSuite);
-			});
+		} else {
+			return this.cryptoSuite.importKey(cert, {algorithm: api.CryptoAlgorithms.X509Certificate})
+				.then((publicKey) => {
+					return new Identity(cert, publicKey, this.getId(), this.cryptoSuite);
+				});
 		}
 	}
 

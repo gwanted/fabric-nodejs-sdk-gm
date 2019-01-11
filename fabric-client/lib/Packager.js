@@ -1,25 +1,18 @@
 /*
-  Licensed under the Apache License, Version 2.0 (the 'License');
-  you may not use this file except in compliance with the License.
-  You may obtain a copy of the License at
-
-  http://www.apache.org/licenses/LICENSE-2.0
-
-  Unless required by applicable law or agreed to in writing, software
-  distributed under the License is distributed on an 'AS IS' BASIS,
-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  See the License for the specific language governing permissions and
-  limitations under the License.
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
 */
 
 'use strict';
 
-var Golang = require('./packager/Golang.js');
-var Car = require('./packager/Car.js');
-var Node = require('./packager/Node.js');
-var utils = require('./utils.js');
+const Golang = require('./packager/Golang.js');
+const Car = require('./packager/Car.js');
+const Node = require('./packager/Node.js');
+const Java = require('./packager/Java.js');
+const utils = require('./utils.js');
 
-var logger = utils.getLogger('packager');
+const logger = utils.getLogger('packager');
 
 /**
  * Utility function to package a chaincode. The contents will be returned as a byte array.
@@ -33,41 +26,38 @@ var logger = utils.getLogger('packager');
  *        The path to the top-level directory containing metadata descriptors
  * @returns {Promise} A promise for the data as a byte array
  */
-module.exports.package = function(chaincodePath, chaincodeType, devmode, metadataPath) {
+module.exports.package = async function (chaincodePath, chaincodeType, devmode, metadataPath) {
 	logger.debug('packager: chaincodePath: %s, chaincodeType: %s, devmode: %s, metadataPath: %s',
-		chaincodePath,chaincodeType,devmode, metadataPath);
-	return new Promise(function(resolve, reject) {
-		if (devmode) {
-			logger.debug('packager: Skipping chaincode packaging due to devmode configuration');
-			return resolve(null);
-		}
+		chaincodePath, chaincodeType, devmode, metadataPath);
 
-		if (!chaincodePath || chaincodePath && chaincodePath.length < 1) {
-			// Verify that chaincodePath is being passed
-			return reject(new Error('Missing chaincodePath parameter'));
-		}
+	if (devmode) {
+		logger.debug('packager: Skipping chaincode packaging due to devmode configuration');
+		return null;
+	}
 
-		let type = chaincodeType ? chaincodeType : 'golang';
-		logger.debug('packager: type %s ',type);
+	if (!chaincodePath || chaincodePath && chaincodePath.length < 1) {
+		// Verify that chaincodePath is being passed
+		throw new Error('Missing chaincodePath parameter');
+	}
 
-		let handler;
+	const type = chaincodeType ? chaincodeType : 'golang';
+	logger.debug('packager: type %s ', type);
 
-		switch (type.toLowerCase()) {
+	let handler;
+
+	switch (type.toLowerCase()) {
 		case 'car':
 			handler = new Car();
 			break;
 		case 'node':
 			handler = new Node();
 			break;
+		case 'java':
+			handler = new Java();
+			break;
 		default:
-			let keep = [
-				'.go',
-				'.c',
-				'.h'
-			];
-			handler = new Golang(keep);
-		}
+			handler = new Golang(['.go', '.c', '.h', '.s']);
+	}
 
-		return resolve(handler.package(chaincodePath, metadataPath));
-	});
+	return handler.package(chaincodePath, metadataPath);
 };

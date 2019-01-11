@@ -60,15 +60,16 @@ version: "1.0"
 channels:
   # name of the channel
   mychannel2:
-    # Required. list of orderers designated by the application to use for transactions on this
+    # List of orderers designated by the application to use for transactions on this
     # channel. This list can be a result of access control ("org1" can only access "ordererA"), or
     # operational decisions to share loads from applications among the orderers.  The values must
-    # be "names" of orgs defined under "organizations/peers"
+    # be "names" of orderers defined under "orderers" section
     orderers:
       - orderer.example.com
 
-    # Required. list of peers from participating orgs
+    # List of peers from participating orgs
     peers:
+      # The values must be peer names defined under "peers" section
       peer0.org1.example.com:
         # [Optional]. will this peer be sent transaction proposals for endorsement? The peer must
         # have the chaincode installed. The app can also use this property to decide which peers
@@ -162,7 +163,6 @@ orderers:
     # they will be passed in as-is to gRPC client constructor
     grpcOptions:
       ssl-target-name-override: orderer.example.com
-      grpc-max-send-message-length: 15
 
     tlsCACerts:
       path: test/fixtures/channel/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tlscacerts/example.com-cert.pem
@@ -176,19 +176,15 @@ peers:
     # this URL is used to send endorsement and query requests
     url: grpcs://localhost:7051
 
-    # this URL is used to connect the EventHub and registering event listeners
-    eventUrl: grpcs://localhost:7053
-
     grpcOptions:
       ssl-target-name-override: peer0.org1.example.com
-      grpc.http2.keepalive_time: 15
+      request-timeout: 120001
 
     tlsCACerts:
       path: test/fixtures/channel/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tlscacerts/org1.example.com-cert.pem
 
   peer0.org2.example.com:
     url: grpcs://localhost:8051
-    eventUrl: grpcs://localhost:8053
     grpcOptions:
       ssl-target-name-override: peer0.org2.example.com
     tlsCACerts:

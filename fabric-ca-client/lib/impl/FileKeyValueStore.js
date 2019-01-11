@@ -1,27 +1,18 @@
 /*
- Copyright 2016 IBM All Rights Reserved.
+ Copyright 2016, 2018 IBM All Rights Reserved.
 
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
+ SPDX-License-Identifier: Apache-2.0
 
-	  http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
 */
 
 'use strict';
 
-var api = require('../api.js');
-var fs = require('fs-extra');
-var path = require('path');
-var utils = require('../utils');
+const api = require('../api.js');
+const fs = require('fs-extra');
+const path = require('path');
+const utils = require('../utils');
 
-var logger = utils.getLogger('FileKeyValueStore.js');
+const logger = utils.getLogger('FileKeyValueStore.js');
 
 /**
  * This is a default implementation of the [KeyValueStore]{@link module:api.KeyValueStore} API.
@@ -30,7 +21,7 @@ var logger = utils.getLogger('FileKeyValueStore.js');
  * @class
  * @extends module:api.KeyValueStore
  */
-var FileKeyValueStore = class extends api.KeyValueStore {
+const FileKeyValueStore = class extends api.KeyValueStore {
 
 	/**
 	 * constructor
@@ -39,7 +30,7 @@ var FileKeyValueStore = class extends api.KeyValueStore {
 	 * for the store
 	 */
 	constructor(options) {
-		logger.debug('constructor', { options: options });
+		logger.debug('constructor', {options: options});
 
 		if (!options || !options.path) {
 			throw new Error('Must provide the path to the directory to hold files for the store.');
@@ -48,27 +39,27 @@ var FileKeyValueStore = class extends api.KeyValueStore {
 		// Create the keyValStore instance
 		super();
 
-		var self = this;
+		const self = this;
 		this._dir = options.path;
-		return new Promise(function (resolve, reject) {
-			fs.mkdirs(self._dir, function (err) {
+		return new Promise(((resolve, reject) => {
+			fs.mkdirs(self._dir, (err) => {
 				if (err) {
-					logger.error('constructor, error creating directory, code: %s' , err.code);
+					logger.error('constructor, error creating directory, code: %s', err.code);
 					return reject(err);
 				}
 				return resolve(self);
 			});
-		});
+		}));
 	}
 
 	getValue(name) {
-		logger.debug('getValue', { key: name });
+		logger.debug('getValue', {key: name});
 
-		var self = this;
+		const self = this;
 
-		return new Promise(function (resolve, reject) {
-			var p = path.join(self._dir, name);
-			fs.readFile(p, 'utf8', function (err, data) {
+		return new Promise(((resolve, reject) => {
+			const p = path.join(self._dir, name);
+			fs.readFile(p, 'utf8', (err, data) => {
 				if (err) {
 					if (err.code !== 'ENOENT') {
 						return reject(err);
@@ -78,24 +69,24 @@ var FileKeyValueStore = class extends api.KeyValueStore {
 				}
 				return resolve(data);
 			});
-		});
+		}));
 	}
 
 	setValue(name, value) {
-		logger.debug('setValue', { key: name });
+		logger.debug('setValue', {key: name});
 
-		var self = this;
+		const self = this;
 
-		return new Promise(function (resolve, reject) {
-			var p = path.join(self._dir, name);
-			fs.writeFile(p, value, function (err) {
+		return new Promise(((resolve, reject) => {
+			const p = path.join(self._dir, name);
+			fs.writeFile(p, value, (err) => {
 				if (err) {
 					reject(err);
 				} else {
 					return resolve(value);
 				}
 			});
-		});
+		}));
 	}
 };
 

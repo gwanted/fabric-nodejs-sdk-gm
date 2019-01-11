@@ -31,6 +31,7 @@ var logger = shim.NewLogger("example_cc1")
 type SimpleChaincode struct {
 }
 
+//Init - instantiation of the state
 func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response  {
 
 	logger.Info("########### example_cc1 Init ###########")
@@ -39,7 +40,7 @@ func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response  {
 	return t.testTransient(stub)
 }
 
-// Transaction makes payment of X units from A to B
+// Invoke - Transaction makes payment of X units from A to B
 func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 	logger.Info("########### example_cc1 Invoke ###########")
 
@@ -54,6 +55,11 @@ func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 		// queries an entity state
 		return t.query(stub, args)
 	}
+
+	if function == "throwError" {
+		return t.throwError(stub, args)
+	}
+
 	if function == "move" {
 		// Deletes an entity from its state
 		return t.move(stub, args)
@@ -109,7 +115,7 @@ func (t *SimpleChaincode) move(stub shim.ChaincodeStubInterface, args []string) 
 		return shim.Error("Invalid transaction amount, expecting a integer value")
 	}
 	Aval = Aval - X
-	Bval = Bval + X + 10 //new version chaincode gives a bonus 
+	Bval = Bval + X + 10 //new version chaincode gives a bonus
 	logger.Infof("Aval = %d, Bval = %d\n", Aval, Bval)
 
 	// Write the state back to the ledger
@@ -170,6 +176,11 @@ func (t *SimpleChaincode) query(stub shim.ChaincodeStubInterface, args []string)
 	jsonResp := "{\"Name\":\"" + A + "\",\"Amount\":\"" + string(Avalbytes) + "\"}"
 	logger.Infof("Query Response:%s\n", jsonResp)
 	return shim.Success(Avalbytes)
+}
+
+func (t *SimpleChaincode) throwError(stub shim.ChaincodeStubInterface, args []string) pb.Response {
+	err := fmt.Errorf("throwError: an error occurred")
+	return shim.Error(err.Error())
 }
 
 // used in SDK test code for transient data support

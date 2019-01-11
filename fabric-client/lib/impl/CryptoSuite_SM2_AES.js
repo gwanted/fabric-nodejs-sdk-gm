@@ -22,9 +22,7 @@ var api = require('../api.js');
 var elliptic = require('elliptic');
 var EC = elliptic.ec;
 var sm2 = require('sm2');
-// var jsrsa = require('jsrsasign');
 var KEYUTIL = sm2.KEYUTIL;
-// var ECDSA = jsrsa.ECDSA;
 var SM2 = sm2.SM2;
 var SM3Digest = sm2.SM3Digest;
 var util = require('util');
@@ -55,20 +53,43 @@ var CryptoSuite_SM2_AES = class extends api.CryptoSuite {
 	 */
 	constructor(keySize, hash) {
 		logger.debug('constructor, keySize: ' + keySize);
-		super();
-
+		if (!keySize) {
+			throw new Error('keySize must be specified');
+		}
 		if (keySize !== 256 && keySize !== 384) {
 			throw new Error('Illegal key size: ' + keySize + ' - this crypto suite only supports key sizes 256 or 384');
 		}
-		if (typeof hash === 'string' && hash !== null && hash !== '') {
-			this._hashAlgo = hash;
+		let hashAlgo;
+		if (hash && typeof hash === 'string') {
+			hashAlgo = hash;
 		} else {
-			this._hashAlgo = utils.getConfigSetting('crypto-hash-algo');
+			hashAlgo = utils.getConfigSetting('crypto-hash-algo');
 		}
+		if (!hashAlgo || typeof hashAlgo !== 'string') {
+			throw new Error(util.format('Unsupported hash algorithm: %j', hashAlgo));
+		}
+		hashAlgo = hashAlgo.toUpperCase();
+		const hashPair = `${hashAlgo}_${keySize}`;
+		if (!api.CryptoAlgorithms[hashPair] || !hashPrimitives[hashPair]) {
+			throw Error(util.format('Unsupported hash algorithm and key size pair111111111: %s', hashPair));
+		}
+		super();
 		this._keySize = keySize;
+		this._hashAlgo = hashAlgo;
 		this._cryptoKeyStore = null;
 
-		this._initialize();
+		if (this._keySize === 256) {
+			this._curveName = 'sm2';
+			this._ecdsaCurve = elliptic.curves['p256'];
+		} else if (this._keySize === 384) {
+			this._curveName = 'secp384r1';
+			this._ecdsaCurve = elliptic.curves['p384'];
+		}
+		this._hashFunction = hashPrimitives['SHA2_256'];
+
+		this._hashOutputSize = this._keySize / 8;
+
+		this._ecdsa = new EC(this._ecdsaCurve);
 
 	}
 
@@ -83,45 +104,6 @@ var CryptoSuite_SM2_AES = class extends api.CryptoSuite {
 	 */
 	setCryptoKeyStore(cryptoKeyStore) {
 		this._cryptoKeyStore = cryptoKeyStore;
-	}
-
-	_initialize() {
-		if (this._keySize === 256) {
-			this._curveName = 'sm2';
-			this._ecdsaCurve = elliptic.curves['p256'];
-		} else if (this._keySize === 384) {
-			this._curveName = 'secp384r1';
-			this._ecdsaCurve = elliptic.curves['p384'];
-		}
-
-		// hash function must be set carefully to produce the hash size compatible with the key algorithm
-		// https://www.ietf.org/rfc/rfc5480.txt (see page 9 "Recommended key size, digest algorithm and curve")
-
-		logger.debug('Hash algorithm: %s, hash output size: %s', this._hashAlgo, this._keySize);
-		console.log(hashPrimitives)
-		switch (this._hashAlgo.toLowerCase() + '-' + this._keySize) {
-			case 'sha3-256':
-				this._hashFunction = hashPrimitives.sha3_256;
-				break;
-			case 'sha3-384':
-				this._hashFunction = hashPrimitives.sha3_384;
-				break;
-			case 'sha2-256':
-				this._hashFunction = hashPrimitives.sha2_256;
-				break;
-			case 'sha2-384':
-				this._hashFunction = hashPrimitives.sha2_384;
-				break;
-			case 'sm3-256':
-				this._hashFunction = hashPrimitives.sha2_256;
-				break;
-			default:
-				throw Error(util.format('Unsupported hash algorithm and key size pair: %s-%s', this._hashAlgo, this._keySize));
-		}
-
-		this._hashOutputSize = this._keySize / 8;
-
-		this._ecdsa = new EC(this._ecdsaCurve);
 	}
 
 	generateKey(opts) {

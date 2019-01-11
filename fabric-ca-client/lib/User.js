@@ -1,29 +1,19 @@
 /*
- Copyright 2016 IBM All Rights Reserved.
-
- Licensed under the Apache License, Version 2.0 (the 'License');
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
-	  http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an 'AS IS' BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
 */
 
 'use strict';
 
-var util = require('util');
-var sdkUtils = require('./utils.js');
-var api = require('./api.js');
-var logger = sdkUtils.getLogger('User.js');
-var idModule = require('./msp/identity.js');
-var Identity = idModule.Identity;
-var SigningIdentity = idModule.SigningIdentity;
-var Signer = idModule.Signer;
+const util = require('util');
+const sdkUtils = require('./utils.js');
+const api = require('./api.js');
+const logger = sdkUtils.getLogger('User.js');
+const idModule = require('./msp/identity.js');
+const Identity = idModule.Identity;
+const SigningIdentity = idModule.SigningIdentity;
+const Signer = idModule.Signer;
 
 /**
  * The User class represents users that have been enrolled and represented by
@@ -44,7 +34,7 @@ var Signer = idModule.Signer;
  *
  * @class
  */
-var User = class {
+const User = class {
 
 	/**
 	 * Constructor for a member.
@@ -58,10 +48,10 @@ var User = class {
 	constructor(cfg) {
 		if (util.isString(cfg)) {
 			this._name = cfg;
-			this._roles = null; //string[]
+			this._roles = null; // string[]
 			this._affiliation = '';
 		} else if (util.isObject(cfg)) {
-			var req = cfg;
+			const req = cfg;
 			this._name = req.enrollmentID || req.name;
 			this._roles = req.roles || ['fabric.user'];
 			this._affiliation = req.affiliation;
@@ -156,9 +146,10 @@ var User = class {
 	 * @param {module:api.Key} privateKey the private key object
 	 * @param {string} certificate the PEM-encoded string of certificate
 	 * @param {string} mspId The Member Service Provider id for the local signing identity
+	 * @param {boolean} skipPersistence Whether to persist this user
 	 * @returns {Promise} Promise for successful completion of creating the user's signing Identity
 	 */
-	setEnrollment(privateKey, certificate, mspId) {
+	async setEnrollment(privateKey, certificate, mspId, skipPersistence) {
 		if (typeof privateKey === 'undefined' || privateKey === null || privateKey === '') {
 			throw new Error('Invalid parameter. Must have a valid private key.');
 		}
@@ -175,20 +166,20 @@ var User = class {
 
 		if (!this._cryptoSuite) {
 			this._cryptoSuite = sdkUtils.newCryptoSuite();
-			this._cryptoSuite.setCryptoKeyStore(sdkUtils.newCryptoKeyStore());
+			if (!skipPersistence) {
+				this._cryptoSuite.setCryptoKeyStore(sdkUtils.newCryptoKeyStore());
+			}
 		}
-		var promise;
-		if (this._cryptoSuite._cryptoKeyStore) {
-			promise = this._cryptoSuite.importKey(certificate);
+
+		let pubKey;
+		if (this._cryptoSuite._cryptoKeyStore && !skipPersistence) {
+			pubKey = await this._cryptoSuite.importKey(certificate);
 		} else {
-			promise = Promise.resolve(this._cryptoSuite.importKey(certificate, {ephemeral: true}));
+			pubKey = await this._cryptoSuite.importKey(certificate, {ephemeral: true});
 		}
-		return promise
-		.then((pubKey) => {
-			var identity = new Identity(certificate, pubKey, mspId, this._cryptoSuite);
-			this._identity = identity;
-			this._signingIdentity = new SigningIdentity(certificate, pubKey, mspId, this._cryptoSuite, new Signer(this._cryptoSuite, privateKey));
-		});
+
+		this._identity = new Identity(certificate, pubKey, mspId, this._cryptoSuite);
+		this._signingIdentity = new SigningIdentity(certificate, pubKey, mspId, this._cryptoSuite, new Signer(this._cryptoSuite, privateKey));
 	}
 
 	/**
@@ -196,16 +187,18 @@ var User = class {
 	 * @returns {boolean} True if enrolled; otherwise, false.
 	 */
 	isEnrolled() {
-		return this._identity !== null && this._signingIdentity != null;
+		return this._identity !== null && this._signingIdentity !== null;
 	}
 
 	/**
 	 * Set the current state of this member from a string based JSON object
+	 * @param {string} str - the member state serialized
+	 * @param {boolean} no_save - to indicate that the cryptoSuite should not save
 	 * @return {Member} Promise of the unmarshalled Member object represented by the serialized string
 	 */
-	fromString(str) {
+	fromString(str, no_save) {
 		logger.debug('fromString --start');
-		var state = JSON.parse(str);
+		const state = JSON.parse(str);
 
 		if (state.name !== this.getName()) {
 			throw new Error('name mismatch: \'' + state.name + '\' does not equal \'' + this.getName() + '\'');
@@ -226,35 +219,52 @@ var User = class {
 			this._cryptoSuite.setCryptoKeyStore(sdkUtils.newCryptoKeyStore());
 		}
 
-		var self = this;
-		var pubKey;
+		const self = this;
+		let pubKey;
 
-		return this._cryptoSuite.importKey(state.enrollment.identity.certificate, { algorithm: api.CryptoAlgorithms.X509Certificate })
-		.then((key) => {
-			pubKey = key;
+		let import_promise = null;
+		const opts = {algorithm: api.CryptoAlgorithms.X509Certificate};
+		if (no_save) {
+			opts.ephemeral = true;
+			import_promise = new Promise((resolve, reject) => {
+				const key = this._cryptoSuite.importKey(state.enrollment.identity.certificate, opts);
+				// construct Promise because importKey does not return Promise when ephemeral is true
+				if (key) {
+					resolve(key);
+				} else {
+					reject(new Error('Import of saved user has failed'));
+				}
+			});
+		} else {
+			import_promise = this._cryptoSuite.importKey(state.enrollment.identity.certificate, opts);
+		}
 
-			var identity = new Identity( state.enrollment.identity.certificate, pubKey, self._mspId, this._cryptoSuite);
-			self._identity = identity;
+		return import_promise
+			.then((key) => {
+				pubKey = key;
 
-			// during serialization (see toString() below) only the key's SKI are saved
-			// swap out that for the real key from the crypto provider
-			return self._cryptoSuite.getKey(state.enrollment.signingIdentity);
-		}).then((privateKey) => {
-			// the key retrieved from the key store using the SKI could be a public key
-			// or a private key, check to make sure it's a private key
-			if (privateKey.isPrivate()) {
-				self._signingIdentity = new SigningIdentity(
-					state.enrollment.identity.certificate,
-					pubKey,
-					self._mspId,
-					self._cryptoSuite,
-					new Signer(self._cryptoSuite, privateKey));
+				const identity = new Identity(state.enrollment.identity.certificate, pubKey, self._mspId, this._cryptoSuite);
+				self._identity = identity;
 
-				return self;
-			} else {
-				throw new Error(util.format('Private key missing from key store. Can not establish the signing identity for user %s', state.name));
-			}
-		});
+				// during serialization (see toString() below) only the key's SKI are saved
+				// swap out that for the real key from the crypto provider
+				return self._cryptoSuite.getKey(state.enrollment.signingIdentity);
+			}).then((privateKey) => {
+				// the key retrieved from the key store using the SKI could be a public key
+				// or a private key, check to make sure it's a private key
+				if (privateKey.isPrivate()) {
+					self._signingIdentity = new SigningIdentity(
+						state.enrollment.identity.certificate,
+						pubKey,
+						self._mspId,
+						self._cryptoSuite,
+						new Signer(self._cryptoSuite, privateKey));
+
+					return self;
+				} else {
+					throw new Error(util.format('Private key missing from key store. Can not establish the signing identity for user %s', state.name));
+				}
+			});
 	}
 
 	/**
@@ -262,7 +272,7 @@ var User = class {
 	 * @return {string} The state of this member as a string
 	 */
 	toString() {
-		var serializedEnrollment = {};
+		const serializedEnrollment = {};
 		if (this._signingIdentity) {
 			serializedEnrollment.signingIdentity = this._signingIdentity._signer._key.getSKI();
 		}
@@ -273,7 +283,7 @@ var User = class {
 			};
 		}
 
-		var state = {
+		const state = {
 			name: this._name,
 			mspid: this._mspId,
 			roles: this._roles,

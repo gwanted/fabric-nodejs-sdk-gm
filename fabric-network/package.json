@@ -1,0 +1,63 @@
+{
+  "name": "fabric-network",
+  "description": "SDK for writing node.js applications to interact with Hyperledger Fabric. This package encapsulates the APIs to connect to a Fabric network, submit transactions and perform queries against the ledger.",
+  "keywords": [
+    "hyperledger",
+    "blockchain"
+  ],
+  "version": "1.4.0-rc2",
+  "tag": "rc2",
+  "main": "index.js",
+  "repository": {
+    "type": "gerrit",
+    "url": "https://gerrit.hyperledger.org/r/#/admin/projects/fabric-sdk-node"
+  },
+  "homepage": "https://www.hyperledger.org/projects/fabric",
+  "author": {
+    "name": "hyperledger/fabric",
+    "email": "fabric@lists.hyperledger.org"
+  },
+  "scripts": {
+    "test": "nyc mocha --exclude 'test/data/**/*.js' --recursive  -t 10000"
+  },
+  "types": "./types/index.d.ts",
+  "dependencies": {
+    "fabric-client": "file:../fabric-client",
+    "fabric-ca-client": "file:../fabric-ca-client",
+    "nano": "^6.4.4",
+    "rimraf": "^2.6.2",
+    "uuid": "^3.2.1"
+  },
+  "devDependencies": {
+    "mocha": "^5.2.0",
+    "nyc": "^12.0.2",
+    "proxyquire": "^2.1.0",
+    "rewire": "^4.0.1",
+    "sinon": "^5.0.7"
+  },
+  "nyc": {
+    "exclude": [
+      "index.js",
+      "coverage/**",
+      "test/**"
+    ],
+    "reporter": [
+      "text-summary",
+      "html"
+    ],
+    "cache": true,
+    "all": true,
+    "check-coverage": true,
+    "statements": 100,
+    "branches": 100,
+    "functions": 100,
+    "lines": 100
+  },
+  "license": "Apache-2.0",
+  "licenses": [
+    {
+      "type": "Apache-2.0",
+      "url": "https://github.com/hyperledger/fabric/blob/master/LICENSE"
+    }
+  ]
+}

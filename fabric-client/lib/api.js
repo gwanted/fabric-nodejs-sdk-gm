@@ -1,17 +1,7 @@
 /*
- Copyright 2016, 2017 IBM All Rights Reserved.
-
- Licensed under the Apache License, Version 2.0 (the "License");
- you may not use this file except in compliance with the License.
- You may obtain a copy of the License at
-
-	  http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
 */
 
 'use strict';
@@ -21,8 +11,6 @@
  *
  * @module api
  */
-
-var utils = require('./utils.js');
 
 /**
  * Abstract class for a Key-Value store. The Channel class uses this store
@@ -44,7 +32,8 @@ module.exports.KeyValueStore = class {
 	 * @returns {Promise} Promise for the value corresponding to the key. If the value does not exist in the
 	 * store, returns null without rejecting the promise
 	 */
-	getValue(name) {}
+	getValue(name) {
+	}
 
 	/**
 	 * Set the value associated with <code>name</code>.
@@ -52,7 +41,8 @@ module.exports.KeyValueStore = class {
 	 * @param {string} value The Value to save
 	 * @returns {Promise} Promise for the 'value' object upon successful write operation
 	 */
-	setValue(name, value) {}
+	setValue(name, value) {
+	}
 
 };
 
@@ -78,9 +68,18 @@ module.exports.CryptoSuite = class {
 	 *
 	 * @param {KeyOpts} opts Optional
 	 * @returns {module:api.Key} Promise for an instance of the Key class
+	 * @throws Will throw an error if not implemented
 	 */
 	generateKey(opts) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
+	}
+
+	/**
+	 * Generate an ephemeral key.
+	 *
+	 * @returns {module:api.Key} An instance of the Key class
+	 * @throws Will throw an error if not implemented
+	 */
+	generateEphemeralKey() {
 	}
 
 	/**
@@ -88,10 +87,10 @@ module.exports.CryptoSuite = class {
 	 * This operation is needed for deriving private keys corresponding to the Transaction Certificates.
 	 *
 	 * @param {module:api.Key} key The source key
+	 * @param {KeyOpts} opts Optional
 	 * @returns {module:api.Key} Derived key
 	 */
 	deriveKey(key, opts) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 
 	/**
@@ -107,7 +106,6 @@ module.exports.CryptoSuite = class {
 	 *          Key class.
 	 */
 	importKey(pem, opts) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 
 	/**
@@ -118,7 +116,6 @@ module.exports.CryptoSuite = class {
 	 * @returns {module:api.Key} Promise of an instance of the Key class corresponding to the ski
 	 */
 	getKey(ski) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 
 	/**
@@ -130,7 +127,6 @@ module.exports.CryptoSuite = class {
 	 * @returns {string} The hashed digest in hexidecimal string encoding
 	 */
 	hash(msg, opts) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 
 	/**
@@ -143,7 +139,6 @@ module.exports.CryptoSuite = class {
 	 * @returns {byte[]} the resulting signature
 	 */
 	sign(key, digest) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 
 	/**
@@ -155,7 +150,6 @@ module.exports.CryptoSuite = class {
 	 * @returns {boolean} true if the signature verifies successfully
 	 */
 	verify(key, signature, digest) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 
 	/**
@@ -168,7 +162,6 @@ module.exports.CryptoSuite = class {
 	 * @returns {byte[]} Cipher text after encryption
 	 */
 	encrypt(key, plaintext, opts) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 
 	/**
@@ -181,7 +174,6 @@ module.exports.CryptoSuite = class {
 	 * @returns {byte[]} Plain text after decryption
 	 */
 	decrypt(key, ciphertext, opts) {
-		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 
 	/**
@@ -195,6 +187,9 @@ module.exports.CryptoSuite = class {
 	 * @abstract
 	 */
 	setCryptoKeyStore(cryptoKeyStore) {
+		if (cryptoKeyStore) {
+			throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
+		}
 		throw new Error('Can\'t call abstract method, must be implemented by sub-class!');
 	}
 };
@@ -304,11 +299,154 @@ module.exports.CryptoAlgorithms = {
 	SHA256: 'SHA256',
 	// SHA384
 	SHA384: 'SHA384',
+	// SHA256
+	SHA2_256: 'SHA256',
+	// SHA384
+	SHA2_384: 'SHA384',
 	// SHA3_256
 	SHA3_256: 'SHA3_256',
 	// SHA3_384
 	SHA3_384: 'SHA3_384',
-
+	// SM3_256
+	SM3_256:'SM3_256',
 	// X509Certificate Label for X509 certificate related operation
 	X509Certificate: 'X509Certificate'
+};
+
+/**
+ * Base class for hash primitives.
+ * @type {Hash}
+ */
+module.exports.Hash = class {
+	constructor(blockSize) {
+		this._blockSize = blockSize;
+		this.reset();
+	}
+
+	hash(data) {
+		return this.reset().update(data).finalize();
+	}
+
+	reset() {
+		return this;
+	}
+
+	update(data) {
+		this._hash.update(data);
+		return this;
+	}
+
+	finalize() {
+	}
+};
+
+/**
+ * Base class for endorsement handling
+ * @class
+ */
+module.exports.EndorsementHandler = class {
+
+	/**
+	 * @typedef {Object} EndorsementHandlerParameters
+	 * @property {Object} request - {@link ChaincodeInvokeRequest}
+	 * @property {Object} signed_proposal - the encoded protobuf "SignedProposal"
+	 *           created by the sendTransactionProposal method before calling the
+	 *           handler. Will be the object to be endorsed by the target peers.
+	 * @property {Number} timeout - the timeout setting passed on sendTransactionProposal
+	 *           method.
+	 */
+
+	/**
+	 * This method will process the request object to calculate the target peers.
+	 * Once the targets have been determined, the channel to send the endorsement
+	 * transaction to all targets. The results will be analyzed to see if
+	 * enough completed endorsements have been received.
+	 *
+	 * @param {EndorsementHandlerParameters} params - A {@link EndorsementHandlerParameters}
+	 *        that contains enough information to determine the targets and contains
+	 *        a {@link ChaincodeInvokeRequest} to be sent using the included channel
+	 *        with the {@link Channel} 'sendTransactionProposal' method.
+	 * @returns {Promise} A Promise for the {@link ProposalResponseObject}, the
+	 *        same results as calling the {@link Channel} 'sendTransactionProposal'
+	 *        method directly.
+	 */
+	endorse(params) {
+		if (params) {
+			throw new Error('The "endorse" method must be implemented');
+		}
+		throw new Error('The "endorse" method must be implemented');
+	}
+
+	/**
+	 * This method will be called by the channel when the channel is initialzied.
+	 */
+	initialize() {
+		throw new Error('The "initialize" method must be implemented');
+	}
+
+	/**
+	 * This static method will be called by the channel to create an instance of
+	 * this handler. It will be passed the channel object this handler is working
+	 * with.
+	 */
+	static create(channel) {
+		if (channel) {
+			throw new Error('The "create" method must be implemented');
+		}
+		throw new Error('The "create" method must be implemented');
+	}
+};
+
+/**
+ * Base class for commit handling
+ * @class
+ */
+module.exports.CommitHandler = class {
+
+	/**
+	 * @typedef {Object} CommitHandlerParameters
+	 * @property {Object} request - {@link TransactionRequest}
+	 * @property {Object} signed_envelope - An object that will be sent to the
+	 *           orderer that contains the encoded endorsed proposals and the
+	 *           signature of the sender.
+	 * @property {Number} timeout - the timeout setting passed on sendTransaction
+	 *           method.
+	 */
+
+	/**
+	 * This method will process the parameters to determine the orderers.
+	 * The handler will use the provided orderers or use the orderers assigned to
+	 * the channel. The handler is expected to preform failover and use all available
+	 * orderers to send the endorsed transaction.
+	 *
+	 * @param {CommitHandlerParameters} params - A {@link EndorsementHandlerParameters}
+	 * @returns {Promise} A Promise for the {@link ProposalResponseObject}, the
+	 *        same results as calling the {@link Channel} 'sendTransactionProposal'
+	 *        method directly.
+	 */
+	commit(params) {
+		if (params) {
+			throw new Error('The "commit" method must be implemented');
+		}
+		throw new Error('The "commit" method must be implemented');
+	}
+
+	/**
+	 * This method will be called by the channel when the channel is initialzied.
+	 */
+	initialize() {
+		throw new Error('The "initialize" method must be implemented');
+	}
+
+	/**
+	 * This static method will be called by the channel to create an instance of
+	 * this handler. It will be passed the channel object this handler is working
+	 * with.
+	 */
+	static create(channel) {
+		if (channel) {
+			throw new Error('The "create" method must be implemented');
+		}
+		throw new Error('The "create" method must be implemented');
+	}
 };
